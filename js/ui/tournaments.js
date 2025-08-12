@@ -48,7 +48,7 @@ async function submitJoin(code, role, payload, user, sport) {
       requesterUid: user.uid,
       requesterName: payload.displayName || 'Captain'
     });
-    await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending: true, requestedAt: Date.now(), teamName: payload.teamName });
+  await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending: true, approved:false, rejected:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
     return res?.name;
   }
   // spectator: save under user
@@ -235,13 +235,13 @@ export function initTournaments(user, appConfig, sportFilter) {
       const approve = document.createElement('button'); approve.textContent='Approve';
       const reject = document.createElement('button'); reject.textContent='Reject';
       approve.addEventListener('click', async ()=>{
-        await updateData(`/tournaments/${code}/teams/${tid}`, { approved: true, approvedAt: Date.now() });
-        if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approvedAt: Date.now() });
+  await updateData(`/tournaments/${code}/teams/${tid}`, { approved: true, approvedAt: Date.now() });
+  if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approved:true, rejected:false, status:'approved', approvedAt: Date.now() });
         const fresh = await adminLoad(code); renderManage(fresh, code);
       });
       reject.addEventListener('click', async ()=>{
-        await updateData(`/tournaments/${code}/teams/${tid}`, { rejected:true, rejectedAt: Date.now() });
-        if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, rejected:true, rejectedAt: Date.now() });
+  await updateData(`/tournaments/${code}/teams/${tid}`, { rejected:true, rejectedAt: Date.now() });
+  if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected', rejectedAt: Date.now() });
         const fresh = await adminLoad(code); renderManage(fresh, code);
       });
       actions.append(approve, reject);
@@ -414,12 +414,17 @@ export function initTournaments(user, appConfig, sportFilter) {
         form.dataset.editingCode = code;
         if (tClearBtn) tClearBtn.classList.remove('hidden');
       });
-      const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.title='Delete (soft)';
+      const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.title='Remove from My Tournaments';
       delBtn.addEventListener('click', async (e)=>{
         e.stopPropagation();
-        if (!created?.[code]) { alert('Only admin can delete'); return; }
-        if (!confirm('Soft-delete this tournament from your list?')) return;
-        await updateData(`/users/${user.uid}/tournaments/created/${code}`, { deleted: true, deletedAt: Date.now() });
+        let path = null;
+        if (created?.[code]) path = `/users/${user.uid}/tournaments/created/${code}`;
+        else if (joined?.[code]) path = `/users/${user.uid}/tournaments/joined/${code}`;
+        else if (spectating?.[code]) path = `/users/${user.uid}/tournaments/spectating/${code}`;
+        if (!path) { alert('Record not found'); return; }
+        const roleText = created?.[code] ? 'your created list (admin can restore via DB)' : 'your list';
+        if (!confirm(`Remove this tournament from ${roleText}?`)) return;
+        await updateData(path, { deleted: true, deletedAt: Date.now() });
         await renderUserLists();
       });
       actions.append(viewBtn, editBtn, delBtn);

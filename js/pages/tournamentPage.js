@@ -104,7 +104,7 @@ async function init(user) {
           if (!existingTeams.includes(name.toLowerCase())) {
             await pushData(`/tournaments/${code}/teams`, { name, createdAt: Date.now(), approved:false, rejected:false, captain: r.uid || null, requesterUid: r.uid || null, requesterName: r.displayName || '' });
             if (r.uid) {
-              await updateData(`/users/${r.uid}/tournaments/joined/${code}`, { pending:true, teamName: name });
+              await updateData(`/users/${r.uid}/tournaments/joined/${code}`, { pending:true, approved:false, rejected:false, status:'pending', teamName: name });
             }
           }
           await deleteData(`/tournaments/${code}/joinRequests/${rid}`);
