@@ -218,12 +218,12 @@ function initTeams(user, sport) {
     }
     form.reset();
     editingIdInput.value='';
-    submitBtn.textContent='Save Team';
+    submitBtn.textContent='Save';
     clearBtn.classList.add('hidden');
     renderTeams();
   });
   clearBtn?.addEventListener('click', ()=>{
-    form.reset(); editingIdInput.value=''; msg.textContent=''; submitBtn.textContent='Save Team'; clearBtn.classList.add('hidden');
+    form.reset(); editingIdInput.value=''; msg.textContent=''; submitBtn.textContent='Save'; clearBtn.classList.add('hidden');
   });
   async function renderTeams() {
     list.innerHTML='<li class="muted">Loading…</li>';
