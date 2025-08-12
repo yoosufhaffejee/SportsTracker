@@ -12,7 +12,8 @@ async function createTournament(user, form, sport) {
   const format = form.querySelector('#tFormat').value || 'league';
   const tName = (form.querySelector('#tName')?.value || '').trim();
   const code = genCode();
-  const config = { sport, format, name: tName || code, createdAt: Date.now(), isPublic: false };
+  const isPublic = !!form.querySelector('#tPublic')?.checked;
+  const config = { sport, format, name: tName || code, createdAt: Date.now(), isPublic };
   // Optional encounters (league + groups_knockout + knockout)
   if (['league','groups_knockout','knockout'].includes(format)) {
     const encountersEl = form.querySelector('#tEncounters');
@@ -32,10 +33,15 @@ async function createTournament(user, form, sport) {
 
 async function submitJoin(code, role, payload, user, sport) {
   if (role === 'captain') {
-    const res = await pushData(`/tournaments/${code}/joinRequests`, {
-      ...payload,
+    // Create a pending team directly under teams
+    const res = await pushData(`/tournaments/${code}/teams`, {
+      name: payload.teamName,
       createdAt: Date.now(),
-      status: 'pending'
+      approved: false,
+      rejected: false,
+      captain: user.uid,
+      requesterUid: user.uid,
+      requesterName: payload.displayName || 'Captain'
     });
     await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending: true, requestedAt: Date.now(), teamName: payload.teamName });
     return res?.name;
@@ -114,6 +120,8 @@ export function initTournaments(user, appConfig, sportFilter) {
           const updateCfg = {};
           if (newName) updateCfg.name = newName;
           if (newFormat) updateCfg.format = newFormat;
+          const pubEl = document.getElementById('tPublic');
+          if (pubEl) updateCfg.isPublic = !!pubEl.checked;
           // Encounters (only relevant for certain formats)
           if (['league','groups_knockout','knockout'].includes(newFormat)) {
             const encEl = document.getElementById('tEncounters');
@@ -186,26 +194,36 @@ export function initTournaments(user, appConfig, sportFilter) {
     }
     manageMsg.textContent = `Managing ${code}`;
 
-    // Join requests
-    joinRequestsList.innerHTML = '';
-    const reqs = Object.entries(t.joinRequests || {});
-    if (!reqs.length) joinRequestsList.innerHTML = '<li class="muted">No requests</li>';
-    for (const [rid, r] of reqs) {
-      const li = document.createElement('li');
-      li.innerHTML = `<span>${r.teamName || 'Team'} — ${r.displayName || ''}</span>`;
-      const actions = document.createElement('span');
-      const approve = document.createElement('button'); approve.textContent = 'Approve';
-      const reject = document.createElement('button'); reject.textContent = 'Reject';
-      approve.addEventListener('click', async () => {
-        await pushData(`/tournaments/${code}/teams`, { name: r.teamName, createdAt: Date.now() });
+    // Migrate legacy joinRequests to pending teams if present
+    if (t.joinRequests && Object.keys(t.joinRequests).length) {
+      for (const [rid, r] of Object.entries(t.joinRequests)) {
+        await pushData(`/tournaments/${code}/teams`, { name: r.teamName, createdAt: Date.now(), approved: false, rejected: false, captain: r.uid || null, requesterUid: r.uid || null, requesterName: r.displayName || '' });
         if (r.uid) {
-          await updateData(`/users/${r.uid}/tournaments/joined/${code}`, { pending: false, approvedAt: Date.now(), teamName: r.teamName });
+          await updateData(`/users/${r.uid}/tournaments/joined/${code}`, { pending: true, teamName: r.teamName });
         }
         await deleteData(`/tournaments/${code}/joinRequests/${rid}`);
+      }
+      // Reload tournament data after migration
+      t = await adminLoad(code) || t;
+    }
+    // Pending teams list replaces join requests
+    joinRequestsList.innerHTML = '';
+    const pendingTeams = Object.entries(t.teams || {}).filter(([tid, tm])=> tm.approved === false && !tm.rejected);
+    if (!pendingTeams.length) joinRequestsList.innerHTML = '<li class="muted">No pending teams</li>';
+    for (const [tid, tm] of pendingTeams) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${tm.name || 'Team'}${tm.requesterName ? ' — '+tm.requesterName : ''}</span>`;
+      const actions = document.createElement('span');
+      const approve = document.createElement('button'); approve.textContent='Approve';
+      const reject = document.createElement('button'); reject.textContent='Reject';
+      approve.addEventListener('click', async ()=>{
+        await updateData(`/tournaments/${code}/teams/${tid}`, { approved: true, approvedAt: Date.now() });
+        if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approvedAt: Date.now() });
         const fresh = await adminLoad(code); renderManage(fresh, code);
       });
-      reject.addEventListener('click', async () => {
-        await deleteData(`/tournaments/${code}/joinRequests/${rid}`);
+      reject.addEventListener('click', async ()=>{
+        await updateData(`/tournaments/${code}/teams/${tid}`, { rejected:true, rejectedAt: Date.now() });
+        if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, rejected:true, rejectedAt: Date.now() });
         const fresh = await adminLoad(code); renderManage(fresh, code);
       });
       actions.append(approve, reject);
@@ -215,11 +233,11 @@ export function initTournaments(user, appConfig, sportFilter) {
 
     // Teams
     teamsList.innerHTML = '';
-    const teams = Object.entries(t.teams || {});
+    const teams = Object.entries(t.teams || {}).filter(([tid, tm])=> !tm.rejected);
     if (!teams.length) teamsList.innerHTML = '<li class="muted">No teams yet</li>';
     for (const [tid, tm] of teams) {
       const li = document.createElement('li');
-      li.innerHTML = `<span>${tm.name || 'Team'}</span>`;
+      li.innerHTML = `<span>${tm.name || 'Team'}${tm.approved===false?' <span class="badge">Pending</span>':''}</span>`;
       teamsList.appendChild(li);
     }
   }
@@ -250,6 +268,10 @@ export function initTournaments(user, appConfig, sportFilter) {
     if (!code) return;
     const t = await readData(`/tournaments/${code}`).catch(()=>null);
   if (!t) { alert('Tournament not found'); return; }
+    if (t.config && t.config.isPublic === false) {
+      alert('This tournament is private. Only participants can view it.');
+      return;
+    }
     // Render
     spectateTitle.textContent = `Tournament ${code}`;
     spectatorView?.classList.remove('hidden');
@@ -358,11 +380,12 @@ export function initTournaments(user, appConfig, sportFilter) {
           const tFull = await readData(`/tournaments/${code}`);
           tConfig = tFull?.config || {};
         } catch {}
-        if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
+  if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
         if (formatSelect && tConfig?.format) formatSelect.value = tConfig.format;
         // Prefill encounters if available
         const encInput = document.getElementById('tEncounters');
         if (encInput && (tConfig?.encounters != null)) encInput.value = tConfig.encounters;
+  const pubEl = document.getElementById('tPublic'); if (pubEl) pubEl.checked = !!tConfig.isPublic;
         // Re-run requirement logic to reveal encounters row if needed
         syncRequirements();
         const form = document.getElementById('tournamentAccessForm');

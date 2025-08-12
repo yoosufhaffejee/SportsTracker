@@ -67,6 +67,22 @@ async function init(user) {
   meta.push(`<span>Code: ${code}</span>`);
   cfgDiv.innerHTML = meta.join(' • ');
 
+  // Determine visibility rights (public OR admin OR approved participant)
+  let canView = true;
+  if (cfg.isPublic === false && !isAdmin) {
+    // Need to verify if user is on an approved team
+    const userJoined = await readData(`/users/${user.uid}/tournaments/joined/${code}`).catch(()=>null);
+    const isApprovedParticipant = !!(userJoined && !userJoined.pending && !userJoined.rejected);
+    canView = isApprovedParticipant;
+  }
+
+  if (!canView) {
+    document.getElementById('tSub').textContent = 'Private tournament – waiting for approval';
+    // Hide tab row panels except basic title/config
+    document.querySelectorAll('.tab-row, .tab-panel').forEach(el=> el.classList.add('hidden'));
+    return; // stop further init
+  }
+
   // Admin vs public panels
   const adminTeamsPanel = document.getElementById('adminTeamsPanel');
   const nonAdminTeamsNotice = document.getElementById('nonAdminTeamsNotice');
@@ -77,6 +93,26 @@ async function init(user) {
   // Load + render helpers
   async function refresh() {
     t = await readData(`/tournaments/${code}`).catch(()=>t);
+    // Migrate legacy joinRequests (pre-unification) so they show up as pending teams
+    if (isAdmin && t?.joinRequests) {
+      const reqEntries = Object.entries(t.joinRequests||{});
+      if (reqEntries.length) {
+        const existingTeams = Object.values(t.teams||{}).map(tm=> (tm.name||'').toLowerCase());
+        for (const [rid, r] of reqEntries) {
+          const name = r.teamName || 'Team';
+            // Skip if team with same name already exists
+          if (!existingTeams.includes(name.toLowerCase())) {
+            await pushData(`/tournaments/${code}/teams`, { name, createdAt: Date.now(), approved:false, rejected:false, captain: r.uid || null, requesterUid: r.uid || null, requesterName: r.displayName || '' });
+            if (r.uid) {
+              await updateData(`/users/${r.uid}/tournaments/joined/${code}`, { pending:true, teamName: name });
+            }
+          }
+          await deleteData(`/tournaments/${code}/joinRequests/${rid}`);
+        }
+        // Reload after migration
+        t = await readData(`/tournaments/${code}`).catch(()=>t);
+      }
+    }
     renderTeams();
     renderStandings();
     renderFixtures();
@@ -110,7 +146,7 @@ async function init(user) {
     e.preventDefault(); const name=(teamNameCombo?.value||'').trim(); if(!name) return; const group=(teamGroupInput?.value||'').trim().toUpperCase();
     const matched = Object.entries(personalTeamsCache||{}).find(([id,p])=> (p.name||'').toLowerCase() === name.toLowerCase());
     const base = matched ? { personalTeamId: matched[0] } : {};
-    const payload = { name, group, createdAt: Date.now(), approved: true, ...base };
+  const payload = { name, group, createdAt: Date.now(), approved: true, captain: user.uid, ...base };
     if (editingTeamId) { await updateData(`/tournaments/${code}/teams/${editingTeamId}`, payload); teamAddMsg.textContent='Updated team'; }
     else { await pushData(`/tournaments/${code}/teams`, payload); teamAddMsg.textContent='Added team'; }
     editingTeamId=null; teamFormSubmitBtn.textContent='Add'; teamFormClearBtn.classList.add('hidden'); addTeamForm.reset(); personalTeamsCache = await loadPersonalTeams(); refresh();
@@ -205,9 +241,13 @@ async function init(user) {
     t = await readData(`/tournaments/${code}`).catch(()=>t);
     const format = t?.config?.format || cfg.format;
     const encounters = Math.max(1, (t?.config?.encounters || cfg.encounters || 1) * 1);
-    const allTeams = Object.entries(t.teams||{}).map(([id,tm])=> ({id, ...tm}));
+    // Only schedule approved (non-rejected) teams
+    const allTeams = Object.entries(t.teams||{})
+      .filter(([id,tm])=> tm.approved && !tm.rejected)
+      .map(([id,tm])=> ({id, ...tm}));
     if (allTeams.length < 2) { fixturesMsg.textContent='Need at least 2 teams'; return; }
-    const grouped = (format === 'groups_knockout') ? groupTeams(t.teams||{}) : null;
+    const filteredTeamsObj = Object.fromEntries(allTeams.map(t=> [t.id, t]));
+    const grouped = (format === 'groups_knockout') ? groupTeams(filteredTeamsObj) : null;
     // Index existing by pair (support legacy without ids)
     const existingIndex = {};
     for (const [mid,m] of Object.entries(t.matches||{})) {
@@ -258,24 +298,43 @@ async function init(user) {
     if (!matches.length) { fixturesList.innerHTML='<div class="muted">No fixtures yet</div>'; return; }
     const regenBtn = document.getElementById('regenFixturesBtn');
     regenBtn?.classList.toggle('hidden', !isAdmin || !matches.length);
-    const encounterMap = {};
+    // Map pair -> last assigned encounter index if legacy matches lack encounter
+    const pairEncounterCount = {};
+    // Group matches by encounter (round)
+    const rounds = {};
     for (const [mid, m] of matches) {
-      const card = document.createElement('div'); card.className='card'; card.style.padding='.6rem .75rem';
-      const scoreStr = (m.scores && m.scores.a!=null && m.scores.b!=null) ? `<strong>${m.scores.a}-${m.scores.b}</strong>` : '<span class="muted">TBD</span>';
       const key = [m.teamAId||m.teamA, m.teamBId||m.teamB].sort().join('|');
-      let encounterNo;
-      if (m.encounter) { encounterNo = m.encounter; encounterMap[key] = Math.max(encounterMap[key]||0, m.encounter); }
-      else { encounterNo = (encounterMap[key]||0) + 1; encounterMap[key] = encounterNo; }
-      card.innerHTML = `<div style='display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap;'>
-        <div><strong>${m.teamA}</strong> vs <strong>${m.teamB}</strong> <span class='muted' style='font-size:.7rem;'>E${encounterNo}</span> ${scoreStr}</div>
-        <div class='muted' style='font-size:.75rem;'>${m.date ? new Date(m.date).toLocaleDateString():''}</div>
-        </div>`;
-      if (isAdmin) {
-        const edit=document.createElement('button'); edit.type='button'; edit.className='icon-btn primary'; edit.innerHTML='✎'; edit.title='Enter result';
-        edit.addEventListener('click', ()=> editMatch(mid,m));
-        card.appendChild(edit);
+      let encounterNo = m.encounter;
+      if (!encounterNo) {
+        encounterNo = (pairEncounterCount[key]||0) + 1;
+        pairEncounterCount[key] = encounterNo;
+      } else {
+        // keep pairEncounterCount in sync in case subsequent legacy ones appear
+        pairEncounterCount[key] = Math.max(pairEncounterCount[key]||0, encounterNo);
       }
-      fixturesList.appendChild(card);
+      if (!rounds[encounterNo]) rounds[encounterNo] = [];
+      rounds[encounterNo].push([mid, m]);
+    }
+    const roundNumbers = Object.keys(rounds).map(n=> parseInt(n,10)).sort((a,b)=> a-b);
+    for (const rNum of roundNumbers) {
+      // Heading
+      const heading = document.createElement('h4'); heading.textContent = `Round ${rNum}`; heading.style.margin = '1rem 0 .5rem';
+      fixturesList.appendChild(heading);
+      // Round fixtures
+      for (const [mid, m] of rounds[rNum]) {
+        const card = document.createElement('div'); card.className='card'; card.style.padding='.6rem .75rem';
+        const scoreStr = (m.scores && m.scores.a!=null && m.scores.b!=null) ? `<strong>${m.scores.a}-${m.scores.b}</strong>` : '<span class="muted">TBD</span>';
+        card.innerHTML = `<div style='display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap;'>
+          <div><strong>${m.teamA}</strong> vs <strong>${m.teamB}</strong> ${scoreStr}</div>
+          <div class='muted' style='font-size:.75rem;'>${m.date ? new Date(m.date).toLocaleDateString():''}</div>
+          </div>`;
+        if (isAdmin) {
+          const edit=document.createElement('button'); edit.type='button'; edit.className='icon-btn primary'; edit.innerHTML='✎'; edit.title='Enter result';
+          edit.addEventListener('click', ()=> editMatch(mid,m));
+          card.appendChild(edit);
+        }
+        fixturesList.appendChild(card);
+      }
     }
   }
 
@@ -284,10 +343,39 @@ async function init(user) {
     const bScore = prompt(`${m.teamB} score`, m.scores?.b!=null?m.scores.b:''); if (bScore===null) return;
     const a = parseInt(aScore,10); const b = parseInt(bScore,10);
     if (isNaN(a) || isNaN(b)) { alert('Invalid scores'); return; }
-    // Simple stat entry (comma separated scorers for each team)
-    const aScorers = prompt('Team A scorers (comma names)', m.scores?.aScorers?.join(',')||'');
-    const bScorers = prompt('Team B scorers (comma names)', m.scores?.bScorers?.join(',')||'');
-    updateData(`/tournaments/${code}/matches/${mid}`, { scores: { a, b, aScorers: splitList(aScorers), bScorers: splitList(bScorers) }, updatedAt: Date.now() }).then(refresh);
+    // Collect players (comma separated) then per-player goals, assists, saves
+    const aPlayersRaw = prompt('Team A players involved (comma separated names)', (m.scores?.aPlayers||[]).map(p=>p.name).join(',') || '');
+    const bPlayersRaw = prompt('Team B players involved (comma separated names)', (m.scores?.bPlayers||[]).map(p=>p.name).join(',') || '');
+    const aPlayerNames = splitList(aPlayersRaw);
+    const bPlayerNames = splitList(bPlayersRaw);
+    function collectDetails(names, prevPlayers) {
+      const list = [];
+      for (const name of names) {
+        const prev = (prevPlayers||[]).find(p=> p.name===name) || {};
+        const gStr = prompt(`Goals for ${name}`, prev.goals!=null?prev.goals: '0'); if (gStr===null) return null;
+        const aStr = prompt(`Assists for ${name}`, prev.assists!=null?prev.assists: '0'); if (aStr===null) return null;
+        const sStr = prompt(`Saves for ${name}`, prev.saves!=null?prev.saves: '0'); if (sStr===null) return null;
+        const goals = parseInt(gStr,10)||0; const assists = parseInt(aStr,10)||0; const saves = parseInt(sStr,10)||0;
+        list.push({ name, goals, assists, saves });
+      }
+      return list;
+    }
+    const aPlayers = collectDetails(aPlayerNames, m.scores?.aPlayers); if (aPlayers===null) return;
+    const bPlayers = collectDetails(bPlayerNames, m.scores?.bPlayers); if (bPlayers===null) return;
+    // Legacy arrays for scorers (expand name per goal) for backwards compatibility
+    const aScorers = aPlayers.flatMap(p=> Array.from({length:p.goals}, ()=> p.name));
+    const bScorers = bPlayers.flatMap(p=> Array.from({length:p.goals}, ()=> p.name));
+    // Optional: validate summed goals against entered score; if mismatch ask to adjust
+    const sumAGoals = aPlayers.reduce((acc,p)=>acc+p.goals,0);
+    const sumBGoals = bPlayers.reduce((acc,p)=>acc+p.goals,0);
+    if (sumAGoals !== a || sumBGoals !== b) {
+      const adjust = confirm(`Entered scores (${a}-${b}) differ from summed player goals (${sumAGoals}-${sumBGoals}). Use summed goals instead?`);
+      if (adjust) { m.scores = m.scores||{}; }
+      if (adjust) { m.scores.a = sumAGoals; m.scores.b = sumBGoals; }
+    }
+    const finalA = (sumAGoals === a || sumAGoals===0) ? a : (confirm('Override Team A score with summed goals?') ? sumAGoals : a);
+    const finalB = (sumBGoals === b || sumBGoals===0) ? b : (confirm('Override Team B score with summed goals?') ? sumBGoals : b);
+    updateData(`/tournaments/${code}/matches/${mid}`, { scores: { a: finalA, b: finalB, aScorers, bScorers, aPlayers, bPlayers }, updatedAt: Date.now() }).then(refresh);
   }
 
   function splitList(str) { return (str||'').split(',').map(s=>s.trim()).filter(Boolean); }
@@ -297,19 +385,51 @@ async function init(user) {
     const goalsBody = document.querySelector('#statsGoals tbody'); if (!goalsBody) return;
     const assistsBody = document.querySelector('#statsAssists tbody');
     const savesBody = document.querySelector('#statsSaves tbody');
+  const goalsTable = document.getElementById('statsGoals'); if (goalsTable) goalsTable.setAttribute('aria-label','Goals');
+  const assistsTable = document.getElementById('statsAssists'); if (assistsTable) assistsTable.setAttribute('aria-label','Assists');
+  const savesTable = document.getElementById('statsSaves'); if (savesTable) savesTable.setAttribute('aria-label','Saves');
     goalsBody.innerHTML=assistsBody.innerHTML=savesBody.innerHTML='';
-    const goalCounts = {};
+    const aggregate = {}; // name -> {goals,assists,saves}
     for (const [mid,m] of Object.entries(t.matches||{})) {
-      const aList = m.scores?.aScorers||[]; const bList = m.scores?.bScorers||[];
-      aList.forEach(p=> goalCounts[p] = (goalCounts[p]||0)+1);
-      bList.forEach(p=> goalCounts[p] = (goalCounts[p]||0)+1);
+      const s = m.scores||{};
+      if (s.aPlayers || s.bPlayers) {
+        (s.aPlayers||[]).forEach(p=>{
+          if(!aggregate[p.name]) aggregate[p.name]={goals:0,assists:0,saves:0};
+          aggregate[p.name].goals += p.goals||0; aggregate[p.name].assists += p.assists||0; aggregate[p.name].saves += p.saves||0;
+        });
+        (s.bPlayers||[]).forEach(p=>{
+          if(!aggregate[p.name]) aggregate[p.name]={goals:0,assists:0,saves:0};
+          aggregate[p.name].goals += p.goals||0; aggregate[p.name].assists += p.assists||0; aggregate[p.name].saves += p.saves||0;
+        });
+      } else {
+        // Legacy fallback: aScorers/bScorers arrays imply 1 goal per occurrence
+        (s.aScorers||[]).forEach(n=> { if(!aggregate[n]) aggregate[n]={goals:0,assists:0,saves:0}; aggregate[n].goals +=1; });
+        (s.bScorers||[]).forEach(n=> { if(!aggregate[n]) aggregate[n]={goals:0,assists:0,saves:0}; aggregate[n].goals +=1; });
+      }
     }
-    const goalRows = Object.entries(goalCounts).sort((a,b)=> b[1]-a[1]);
-    if (!goalRows.length) goalsBody.innerHTML='<tr><td colspan="2" class="muted">No goals</td></tr>';
-    else goalRows.forEach(([player,g])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${player}</td><td>${g}</td>`; goalsBody.appendChild(tr); });
-    // Assists / Saves placeholders (future extension)
-    assistsBody.innerHTML='<tr><td colspan="2" class="muted">Coming soon</td></tr>';
-    savesBody.innerHTML='<tr><td colspan="2" class="muted">Coming soon</td></tr>';
+    const goalRows = Object.entries(aggregate).filter(([n,st])=> st.goals>0).sort((a,b)=> b[1].goals - a[1].goals || a[0].localeCompare(b[0]));
+    const assistRows = Object.entries(aggregate).filter(([n,st])=> st.assists>0).sort((a,b)=> b[1].assists - a[1].assists || a[0].localeCompare(b[0]));
+    const saveRows = Object.entries(aggregate).filter(([n,st])=> st.saves>0).sort((a,b)=> b[1].saves - a[1].saves || a[0].localeCompare(b[0]));
+    function ensureEmptyMsg(tableEl, hasData) {
+      if (!tableEl) return;
+      let msg = tableEl.parentElement.querySelector('.stats-empty-msg');
+      if (hasData) {
+        tableEl.style.display='table';
+        if (msg) msg.remove();
+      } else {
+        tableEl.style.display='none';
+        if (!msg) {
+          msg = document.createElement('div'); msg.className='muted stats-empty-msg'; msg.textContent='No data';
+          tableEl.parentElement.appendChild(msg);
+        }
+      }
+    }
+    if (goalRows.length) goalRows.forEach(([player,st])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${player}</td><td>${st.goals}</td>`; goalsBody.appendChild(tr); });
+    if (assistRows.length) assistRows.forEach(([player,st])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${player}</td><td>${st.assists}</td>`; assistsBody.appendChild(tr); });
+    if (saveRows.length) saveRows.forEach(([player,st])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${player}</td><td>${st.saves}</td>`; savesBody.appendChild(tr); });
+    ensureEmptyMsg(goalsTable, goalRows.length>0);
+    ensureEmptyMsg(assistsTable, assistRows.length>0);
+    ensureEmptyMsg(savesTable, saveRows.length>0);
   }
 
   // Details / info
