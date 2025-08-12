@@ -77,10 +77,10 @@ function initPlayerForm(user, sport, teamId){
       await pushData(`/users/${user.uid}/teams/${sport}/${teamId}/players`, { ...payload, createdAt: Date.now() });
       msg.textContent='Added';
     }
-    form.reset(); idInput.value=''; submitBtn.textContent='Add'; clearBtn.classList.add('hidden');
+    form.reset(); idInput.value=''; submitBtn.textContent='Save'; clearBtn.classList.add('hidden');
     await renderPlayers(user, sport, teamId);
   });
-  clearBtn?.addEventListener('click', ()=>{ form.reset(); idInput.value=''; msg.textContent=''; submitBtn.textContent='Add'; clearBtn.classList.add('hidden'); });
+  clearBtn?.addEventListener('click', ()=>{ form.reset(); idInput.value=''; msg.textContent=''; submitBtn.textContent='Save'; clearBtn.classList.add('hidden'); });
 }
 
 async function renderPlayers(user, sport, teamId){

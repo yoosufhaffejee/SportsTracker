@@ -53,7 +53,7 @@ async function init(user){
   function resetForm(){
     form.tpId.value='';
     nameCombo.value=''; surnameInput.value=''; ageInput.value=''; contactInput.value='';
-    submitBtn.textContent='Add'; clearBtn.classList.add('hidden'); msgEl.textContent='';
+    submitBtn.textContent='Save'; clearBtn.classList.add('hidden'); msgEl.textContent='';
   }
   clearBtn?.addEventListener('click', resetForm);
 

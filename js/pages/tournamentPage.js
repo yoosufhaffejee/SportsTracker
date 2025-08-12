@@ -140,7 +140,7 @@ async function init(user) {
   }
   let personalTeamsCache = await loadPersonalTeams();
 
-  teamFormClearBtn?.addEventListener('click', ()=>{ editingTeamId=null; addTeamForm.reset(); teamFormSubmitBtn.textContent='Add'; teamFormClearBtn.classList.add('hidden'); teamAddMsg.textContent=''; });
+  teamFormClearBtn?.addEventListener('click', ()=>{ editingTeamId=null; addTeamForm.reset(); teamFormSubmitBtn.textContent='Save'; teamFormClearBtn.classList.add('hidden'); teamAddMsg.textContent=''; });
 
   addTeamForm?.addEventListener('submit', async (e)=>{
     e.preventDefault(); const name=(teamNameCombo?.value||'').trim(); if(!name) return; const group=(teamGroupInput?.value||'').trim().toUpperCase();
@@ -149,7 +149,7 @@ async function init(user) {
   const payload = { name, group, createdAt: Date.now(), approved: true, captain: user.uid, ...base };
     if (editingTeamId) { await updateData(`/tournaments/${code}/teams/${editingTeamId}`, payload); teamAddMsg.textContent='Updated team'; }
     else { await pushData(`/tournaments/${code}/teams`, payload); teamAddMsg.textContent='Added team'; }
-    editingTeamId=null; teamFormSubmitBtn.textContent='Add'; teamFormClearBtn.classList.add('hidden'); addTeamForm.reset(); personalTeamsCache = await loadPersonalTeams(); refresh();
+    editingTeamId=null; teamFormSubmitBtn.textContent='Save'; teamFormClearBtn.classList.add('hidden'); addTeamForm.reset(); personalTeamsCache = await loadPersonalTeams(); refresh();
   });
 
   function renderTeams() {

@@ -47,7 +47,7 @@
               <div class="row"><label for="friendlyTeamB">Team B <span class="req">*</span></label><input id="friendlyTeamB" required /></div>
               <div class="row"><label for="friendlyScoreA">Score A</label><input id="friendlyScoreA" type="number" min="0" /></div>
               <div class="row"><label for="friendlyScoreB">Score B</label><input id="friendlyScoreB" type="number" min="0" /></div>
-              <div class="row" style="grid-column:1/-1; display:flex; align-items:center; gap:.5rem;"><button id="friendlySubmitBtn" type="submit">Save</button><button id="friendlyClearBtn" type="button" class="secondary hidden">Clear</button><span id="friendlyMsg" class="muted"></span></div>
+              <div class="row" style="grid-column:1/-1; display:flex; align-items:center; gap:.5rem;"><button id="friendlySubmitBtn" type="submit" class="primary">Save</button><button id="friendlyClearBtn" type="button" class="secondary hidden">Clear</button><span id="friendlyMsg" class="muted"></span></div>
             </form>
             <div class="card" style="margin-top:.75rem;">
               <h5>Recent Friendlies</h5>
@@ -111,7 +111,7 @@
                 </div>
               </div>
               <div class="row" style="grid-column:1/-1; display:flex; align-items:center; gap:.5rem;">
-                <button type="submit">Save</button>
+                <button type="submit" class="primary">Save</button>
                 <button type="button" id="tAccessClearBtn" class="secondary">Clear</button>
                 <span id="tournamentAccessMsg" class="muted"></span>
               </div>
@@ -125,7 +125,7 @@
               <input type="hidden" id="teamEditingId" />
               <div class="row"><label for="teamNameInput">Team Name <span class="req">*</span></label><input id="teamNameInput" required /></div>
               <div class="row" style="grid-column:1/-1; display:flex; gap:.5rem; align-items:center;">
-                <button type="submit" id="teamSubmitBtn">Save</button>
+                <button type="submit" id="teamSubmitBtn" class="primary">Save</button>
                 <button type="button" id="teamClearBtn" class="secondary hidden">Clear</button>
                 <span id="teamMsg" class="muted"></span>
               </div>
@@ -139,7 +139,7 @@
               <div class="row"><label for="spPlayerSelect">Player</label><select id="spPlayerSelect"></select></div>
               <div class="row"><label for="playerPosition">Primary Position</label><input id="playerPosition" placeholder="e.g. Left" /></div>
               <div class="row"><label for="playerAltPositions">Alt Positions (comma)</label><input id="playerAltPositions" placeholder="e.g. Right" /></div>
-              <div class="row" style="grid-column:1/-1;"><button type="submit">Save</button><span id="playerExtraMsg" class="muted"></span></div>
+              <div class="row" style="grid-column:1/-1;"><button type="submit" class="primary">Save</button><span id="playerExtraMsg" class="muted"></span></div>
             </form>
           </div>
         </div>
