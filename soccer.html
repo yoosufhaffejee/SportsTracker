@@ -100,11 +100,6 @@
                     <option value="groups_knockout">Group + Knockout</option>
                   </select>
                 </div>
-                <!-- Public toggle added -->
-                <div class="row" style="align-items:center;">
-                  <label for="tPublic">Public?</label>
-                  <input id="tPublic" type="checkbox" />
-                </div>
                 <div class="row" id="tEncountersRow" hidden>
                   <label for="tEncounters" id="tEncountersLabel">Encounters <span class="req">*</span></label>
                   <select id="tEncounters" required>
@@ -113,6 +108,9 @@
                     <option value="3">3</option>
                     <option value="4">4</option>
                   </select>
+                </div>
+                <div class="row" style="align-items:center; margin-top:.25rem;">
+                  <label for="tPublic" class="checkbox-label"><input id="tPublic" type="checkbox" /> Public?</label>
                 </div>
               </div>
               <div id="tActionJoinFields" hidden>
