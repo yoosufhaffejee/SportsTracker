@@ -58,10 +58,13 @@ export function initPlayerManager(user) {
       return;
     }
     if (!id) {
-      // uniqueness on surname for new create
+      // Uniqueness: name + surname combination (case-insensitive)
       const existing = await readData(getPlayersPath(user.uid)).catch(() => ({}));
-      const clash = Object.values(existing || {}).find(p => (p?.surname || '').toLowerCase() === data.surname.toLowerCase());
-      if (clash) { msg.textContent = 'Surname must be unique per user.'; return; }
+      const clash = Object.values(existing || {}).find(p => (
+        (p?.name || '').trim().toLowerCase() === data.name.toLowerCase() &&
+        (p?.surname || '').trim().toLowerCase() === data.surname.toLowerCase()
+      ));
+      if (clash) { msg.textContent = 'A player with that Name + Surname already exists.'; return; }
       await pushData(getPlayersPath(user.uid), { ...data, createdAt: Date.now() });
       msg.textContent = 'Saved!';
     } else {

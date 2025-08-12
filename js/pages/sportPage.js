@@ -199,33 +199,57 @@ function initTeams(user, sport) {
   const form = document.getElementById('teamForm');
   const list = document.getElementById('teamList');
   const msg = document.getElementById('teamMsg');
+  const nameInput = document.getElementById('teamNameInput');
+  const editingIdInput = document.getElementById('teamEditingId');
+  const submitBtn = document.getElementById('teamSubmitBtn');
+  const clearBtn = document.getElementById('teamClearBtn');
   if (!form || !list) return;
   form.addEventListener('submit', async (e)=>{
     e.preventDefault(); msg.textContent='';
-    const name = (document.getElementById('teamNameInput').value||'').trim();
+    const name = (nameInput.value||'').trim();
     if (!name) { msg.textContent='Name required'; return; }
-    await pushData(`/users/${user.uid}/teams/${sport}`, { name, createdAt: Date.now() });
-    msg.textContent='Saved';
+    const editingId = editingIdInput.value || null;
+    if (editingId) {
+      await updateData(`/users/${user.uid}/teams/${sport}/${editingId}`, { name, updatedAt: Date.now() });
+      msg.textContent='Updated';
+    } else {
+      await pushData(`/users/${user.uid}/teams/${sport}`, { name, createdAt: Date.now() });
+      msg.textContent='Saved';
+    }
     form.reset();
+    editingIdInput.value='';
+    submitBtn.textContent='Save Team';
+    clearBtn.classList.add('hidden');
     renderTeams();
+  });
+  clearBtn?.addEventListener('click', ()=>{
+    form.reset(); editingIdInput.value=''; msg.textContent=''; submitBtn.textContent='Save Team'; clearBtn.classList.add('hidden');
   });
   async function renderTeams() {
     list.innerHTML='<li class="muted">Loading…</li>';
     const data = await readData(`/users/${user.uid}/teams/${sport}`).catch(()=>({}));
-    const entries = Object.entries(data||{}).sort((a,b)=> (a[1].name||'').localeCompare(b[1].name||''));
+    const entries = Object.entries(data||{}).filter(([,t])=> !t.deleted).sort((a,b)=> (a[1].name||'').localeCompare(b[1].name||''));
     if (!entries.length) { list.innerHTML='<li class="muted">None yet</li>'; return; }
     list.innerHTML='';
     for (const [id, t] of entries) {
       const li = document.createElement('li');
       const nameSpan = document.createElement('span'); nameSpan.textContent = t.name;
       const actions = document.createElement('span'); actions.style.display='flex'; actions.style.gap='.4rem';
-  const editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='icon-btn primary'; editBtn.innerHTML='✎'; editBtn.setAttribute('aria-label','Edit team');
-      editBtn.addEventListener('click', async ()=>{
-        const choice = prompt('Edit team name', t.name); if (choice===null) return; const newName = choice.trim(); if (!newName) return; await updateData(`/users/${user.uid}/teams/${sport}/${id}`, { name:newName }); renderTeams();
+      const editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='icon-btn primary'; editBtn.innerHTML='✎'; editBtn.setAttribute('aria-label','Edit team');
+      editBtn.addEventListener('click', ()=>{
+        editingIdInput.value = id;
+        nameInput.value = t.name || '';
+        submitBtn.textContent='Update Team';
+        clearBtn.classList.remove('hidden');
+        nameInput.focus();
       });
-  const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.setAttribute('aria-label','Delete team');
-  delBtn.addEventListener('click', async ()=>{ if (!confirm('Delete team?')) return; await updateData(`/users/${user.uid}/teams/${sport}/${id}`, { deleted:true }); renderTeams(); });
-      actions.append(editBtn, delBtn);
+      const viewBtn = document.createElement('button'); viewBtn.type='button'; viewBtn.className='icon-btn success'; viewBtn.innerHTML='👁'; viewBtn.setAttribute('aria-label','View team');
+      viewBtn.addEventListener('click', ()=>{
+        window.location.href = `./localTeam.html?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(id)}`;
+      });
+      const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.setAttribute('aria-label','Delete team');
+      delBtn.addEventListener('click', async ()=>{ if (!confirm('Delete team?')) return; await updateData(`/users/${user.uid}/teams/${sport}/${id}`, { deleted:true, deletedAt: Date.now() }); renderTeams(); });
+      actions.append(editBtn, viewBtn, delBtn);
       li.append(nameSpan, actions);
       list.appendChild(li);
     }

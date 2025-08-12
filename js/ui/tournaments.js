@@ -276,9 +276,9 @@ export function initTournaments(user, appConfig, sportFilter) {
     spectateTitle.textContent = `Tournament ${code}`;
     spectatorView?.classList.remove('hidden');
 
-    // Teams
+    // Teams (exclude pending or rejected)
     spectateTeams.innerHTML = '';
-    const teams = Object.entries(t.teams || {});
+    const teams = Object.entries(t.teams || {}).filter(([id, tm])=> tm.approved !== false && !tm.rejected);
     if (!teams.length) spectateTeams.innerHTML = '<li class="muted">No teams yet</li>';
     for (const [tid, tm] of teams) {
       const li = document.createElement('li');

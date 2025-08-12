@@ -36,5 +36,13 @@
  ,
  {"file":"tournamentPage.js","purpose":"Encounter duplication fix","lastUpdated":"2025-08-12","notes":"Alternating home/away and correct counting; ensures encounters number reached (e.g., 2 teams + 2 encounters => 2 fixtures)."}
  ,
- {"file":"tournament.html","purpose":"Encounters edit support","lastUpdated":"2025-08-12","notes":"Added encounters edit field in Details tab; always display encounters meta; allows fixing missing encounters for existing tournaments."}
+  {"file":"tournament.html","purpose":"Encounters edit support","lastUpdated":"2025-08-12","notes":"Added encounters edit field in Details tab; always display encounters meta; allows fixing missing encounters for existing tournaments."},
+  {"file":"soccer.html","purpose":"Tournament form enhancement","lastUpdated":"2025-08-12","notes":"Reintroduced Public checkbox to toggle isPublic when creating tournaments."},
+  {"file":"padel.html","purpose":"Tournament form enhancement","lastUpdated":"2025-08-12","notes":"Added Public checkbox for tournament visibility."},
+  {"file":"tennis.html","purpose":"Tournament form enhancement","lastUpdated":"2025-08-12","notes":"Added Public checkbox for tournament visibility."},
+  {"file":"squash.html","purpose":"Tournament form enhancement","lastUpdated":"2025-08-12","notes":"Added Public checkbox for tournament visibility."},
+  {"file":"volleyball.html","purpose":"Tournament form enhancement","lastUpdated":"2025-08-12","notes":"Added Public checkbox for tournament visibility."},
+  {"file":"padel.html","purpose":"Structure + UI cleanup","lastUpdated":"2025-08-12","notes":"Fixed malformed head, removed stray Action row, added meta viewport & title, aligned Role select label with other sports."},
+  {"file":"js/ui/tournaments.js","purpose":"Public/private tournaments & spectator guard","lastUpdated":"2025-08-12","notes":"Persist isPublic flag on create/edit; prefill on edit; block spectate of private tournaments unless participant; retain pending join ability."},
+  {"file":"js/pages/tournamentPage.js","purpose":"Private tournament gating","lastUpdated":"2025-08-12","notes":"Gates full tournament view for private tournaments to admin or approved participants only; pending users see waiting notice and hidden tabs."}
 ]

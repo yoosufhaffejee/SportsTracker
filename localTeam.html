@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local Team · Sports Tracker</title>
+  <link rel="icon" href="./assets/logo.svg" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script type="module" src="./js/shared/bootstrap.js"></script>
+  <script type="module" src="./js/pages/localTeamPage.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <img src="./assets/logo.svg" alt="Sports Tracker" class="logo" />
+      <h1 id="teamHeader">Local Team</h1>
+    </div>
+    <div class="header-actions">
+      <button id="themeToggle" aria-label="Toggle dark mode">🌙</button>
+      <div id="userPanel" class="user-panel hidden">
+        <img id="userAvatar" class="avatar" alt="User avatar" />
+        <span id="userName"></span>
+        <button id="signOutBtn" class="secondary">Sign out</button>
+      </div>
+    </div>
+  </header>
+  <main class="container" id="appContent">
+    <div class="page-nav"><a id="backLink" href="javascript:history.back()">Back</a></div>
+    <section>
+      <div class="card" id="teamMetaCard">
+        <h3 id="teamTitle">Loading...</h3>
+        <p class="muted" id="teamSub"></p>
+        <div id="teamMeta" class="muted" style="font-size:.85rem; display:flex; gap:.5rem; flex-wrap:wrap;"></div>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h4>Manage Local Players</h4>
+          <form id="localTeamPlayerForm" class="grid two">
+            <input type="hidden" id="ltpId" />
+            <div class="row" style="grid-column:1/-1;">
+              <label for="ltpName">Player Name <span class="req">*</span></label>
+              <input id="ltpName" required />
+            </div>
+            <div class="row">
+              <label for="ltpAge">Age</label>
+              <input id="ltpAge" type="number" min="1" placeholder="Age" />
+            </div>
+            <div class="row" style="grid-column:1/-1;">
+              <label for="ltpContact">Contact Number <span class="req">*</span></label>
+              <input id="ltpContact" type="tel" placeholder="e.g. 5551234567" required />
+            </div>
+            <div class="row" style="grid-column:1/-1; display:flex; gap:.5rem; align-items:center;">
+              <button type="submit" id="ltpSubmitBtn">Add</button>
+              <button type="button" id="ltpClearBtn" class="secondary hidden">Clear</button>
+              <span id="ltpMsg" class="muted"></span>
+            </div>
+          </form>
+          <h5 style="margin-top:.75rem;">Players</h5>
+          <ul id="localTeamPlayersList" class="item-list"></ul>
+        </div>
+        <div class="card">
+          <h4>Team Info</h4>
+          <div id="localTeamInfo"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="app-footer"><small>© <span id="year"></span> Sports Tracker</small></footer>
+  <script>document.addEventListener('DOMContentLoaded', ()=>{ const y=document.getElementById('year'); if (y) y.textContent=new Date().getFullYear(); });</script>
+</body>
+</html>

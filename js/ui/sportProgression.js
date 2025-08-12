@@ -1,4 +1,4 @@
-import { getPlayersPath, readData, updateData } from '../firebase.js';
+import { getPlayersPath, readData, updateData, pushData } from '../firebase.js';
 import { renderRadar } from '../charts.js';
 
 // Attribute sets per sport. Racket share a common base.
@@ -77,31 +77,34 @@ export function initSportProgression(user, appConfig) {
       const overall = computeOverall(ratings);
       overallEl.textContent = `Overall: ${overall}`;
       const now = Date.now();
-      const dt = new Date(now);
-      const key = dt.toISOString();
       const playerPath = `${getPlayersPath(user.uid)}/${current.id}`;
+      // Load existing once so we can deep merge safely
+      const player = await readData(playerPath).catch(()=>null) || {};
+      const existingProgAll = player.sportProgression || {};
+      const existingProgForSport = existingProgAll[current.sport] || {};
+      let updatedProgForSport = { ...existingProgForSport };
       if (merge) {
-        // Update latest snapshot (by replacing most recent entry)
-        const player = await readData(playerPath).catch(()=>null);
-        const prog = player?.sportProgression?.[current.sport] || {};
-        const latest = Object.entries(prog).sort((a,b)=> (b[1]?.at||0)-(a[1]?.at||0))[0];
-        let newProg = {};
+        // Find latest snapshot key and replace its content
+        const latest = Object.entries(existingProgForSport).sort((a,b)=> (b[1]?.at||0)-(a[1]?.at||0))[0];
         if (latest) {
-          // replace latest key's content
-            newProg[latest[0]] = { ratings, overall, at: now };
+          updatedProgForSport[latest[0]] = { ratings, overall, at: now };
         } else {
-          newProg[key] = { ratings, overall, at: now };
+          const pushRes = await pushData(`${playerPath}/sportProgression/${current.sport}`, { ratings, overall, at: now });
+          // push already wrote; fetch key result just for local state
+          updatedProgForSport[pushRes.name] = { ratings, overall, at: now };
         }
-        await updateData(playerPath, {
-          sportRatings: { [current.sport]: { ratings, overall, updatedAt: now } },
-          sportProgression: { [current.sport]: newProg }
-        });
       } else {
-        await updateData(playerPath, {
-          sportRatings: { [current.sport]: { ratings, overall, updatedAt: now } },
-          sportProgression: { [current.sport]: { [key]: { ratings, overall, at: now } } }
-        });
+        // New snapshot: use push to avoid key conflicts & invalid chars
+        const pushRes = await pushData(`${playerPath}/sportProgression/${current.sport}`, { ratings, overall, at: now });
+        updatedProgForSport[pushRes.name] = { ratings, overall, at: now };
       }
+      const newSportProgression = { ...existingProgAll, [current.sport]: updatedProgForSport };
+      const newSportRatings = { ...(player.sportRatings||{}), [current.sport]: { ratings, overall, updatedAt: now } };
+      await updateData(playerPath, {
+        sportProgression: newSportProgression,
+        sportRatings: newSportRatings,
+        updatedAt: now
+      });
       saveMsg.textContent = 'Saved!'; setTimeout(()=> saveMsg.textContent = '', 2000);
       renderHistory(current.id, current.sport);
       const labels = current.attrs;

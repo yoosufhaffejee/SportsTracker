@@ -54,25 +54,58 @@
         </details>
       </div>
 
-      <!-- Spectator read-only view -->
-      <div id="spectatorView" class="card hidden">
-        <div class="inline" style="justify-content: space-between; align-items: center;">
-          <h2 id="spectateTitle">Tournament</h2>
-          <button id="spectateBack" class="secondary">Back</button>
-        </div>
-        <div class="grid two">
-          <div>
-            <h3>Teams</h3>
-            <ul id="spectateTeams" class="list"></ul>
+      <!-- Spectator read-only view (tabbed) -->
+      <div id="spectatorView" class="hidden">
+        <div class="card" style="margin-bottom:.75rem;">
+          <div class="inline" style="justify-content: space-between; align-items: center;">
+            <h2 id="spectateTitle">Tournament</h2>
+            <button id="spectateBack" class="secondary">Back</button>
           </div>
-          <div>
-            <h3>Leaderboard</h3>
-            <ul id="spectateStats" class="list"></ul>
+          <p class="muted" id="spectateSub"></p>
+          <div id="spectateMeta" class="muted" style="font-size:.8rem; display:flex; gap:.5rem; flex-wrap:wrap;"></div>
+        </div>
+        <div class="tab-row" id="spectateTabs">
+          <div class="tab active" data-tab="spteams">Teams</div>
+          <div class="tab" data-tab="spstandings">Standings</div>
+          <div class="tab" data-tab="spfixtures">Fixtures</div>
+          <div class="tab" data-tab="spstats">Stats</div>
+          <div class="tab" data-tab="spdetails">Details / Info</div>
+        </div>
+        <div id="tab-spteams" class="tab-panel active">
+          <div class="card">
+            <h4>Teams</h4>
+            <ul id="spectateTeams" class="item-list"></ul>
           </div>
         </div>
-        <div class="card" style="margin-top:1rem;">
-          <h3>Fixtures & Results</h3>
-          <div id="spectateFixtures"></div>
+        <div id="tab-spstandings" class="tab-panel">
+          <div class="card">
+            <h4>Standings</h4>
+            <table id="spectateStandings" style="width:100%; border-collapse:collapse;">
+              <thead><tr><th>Team</th><th>GP</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="tab-spfixtures" class="tab-panel">
+          <div class="card">
+            <h4>Fixtures</h4>
+            <div id="spectateFixtures" style="display:grid; gap:.75rem;"></div>
+          </div>
+        </div>
+        <div id="tab-spstats" class="tab-panel">
+          <div class="card">
+            <h4>Stats</h4>
+            <div class="grid two" style="gap:1.25rem;">
+              <div><h5>Goals</h5><table id="spectateGoals" class="stat-table"><tbody></tbody></table></div>
+              <div><h5>Assists</h5><table id="spectateAssists" class="stat-table"><tbody></tbody></table></div>
+            </div>
+          </div>
+        </div>
+        <div id="tab-spdetails" class="tab-panel">
+          <div class="card">
+            <h4>Details / Info</h4>
+            <div id="spectateDetails"></div>
+          </div>
         </div>
       </div>
     </section>
