@@ -1,0 +1,28 @@
+{
+  "sports": {
+    "soccer": {
+      "name": "Soccer",
+      "stats": ["goals", "assists", "shots", "passes", "tackles", "saves"]
+    },
+    "padel": {
+      "name": "Padel",
+      "stats": ["winners", "errors", "aces", "doubleFaults"]
+    },
+    "tennis": {
+      "name": "Tennis",
+      "stats": ["aces", "doubleFaults", "winners", "unforcedErrors"]
+    },
+    "squash": {
+      "name": "Squash",
+      "stats": ["winners", "errors", "ralliesWon", "ralliesLost"]
+    },
+    "volleyball": {
+      "name": "Volleyball",
+      "stats": ["spikes", "blocks", "aces", "digs", "assists"]
+    }
+  },
+  "attributes": {
+    "coreRatings": ["Shooting","Passing","Dribbling","Pace","Defending","Physical","Goalkeeping"]
+  },
+  "formats": ["league","knockout","groups_knockout","americano"]
+}

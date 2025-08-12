@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sports Tracker</title>
+    <link rel="icon" href="./assets/logo.svg" />
+    <link rel="stylesheet" href="./css/styles.css" />
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <!-- App Entry -->
+  <script type="module" src="./js/pages/homePage.js"></script>
+    <script>
+      // Configure these for your Firebase & GIS
+  window.APP_GIS_CLIENT_ID = '169612184657-tq44nbhesnjg0anugbq1i1rt85fbv5pf.apps.googleusercontent.com';
+      window.APP_FIREBASE_API_KEY = 'AIzaSyAXa-MW8RgOf-sk1c2LjMY8iDG_IyK3h1M';
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <div class="banner warning">This app requires JavaScript to run.</div>
+    </noscript>
+    <header class="app-header">
+      <div class="brand">
+        <img src="./assets/logo.svg" alt="Sports Tracker" class="logo" />
+        <h1>Sports Tracker</h1>
+      </div>
+      <div class="header-actions">
+        <button id="themeToggle" aria-label="Toggle dark mode">🌙</button>
+        <div id="userPanel" class="user-panel hidden">
+          <img id="userAvatar" class="avatar" alt="User avatar" />
+          <span id="userName"></span>
+          <button id="signOutBtn" class="secondary">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Public (not signed-in) view -->
+    <section id="publicView" class="container">
+      <div class="card">
+        <h2>Welcome</h2>
+        <p>Sign in with Google to manage your players and competitions.</p>
+        <div id="gsi-container">
+          <div id="gsi-button"></div>
+        </div>
+        <details>
+          <summary>Enter tournament code to spectate</summary>
+          <form id="spectateForm" class="inline">
+            <input type="text" id="spectateCode" placeholder="Tournament code" required />
+            <button type="submit">View</button>
+          </form>
+        </details>
+      </div>
+
+      <!-- Spectator read-only view -->
+      <div id="spectatorView" class="card hidden">
+        <div class="inline" style="justify-content: space-between; align-items: center;">
+          <h2 id="spectateTitle">Tournament</h2>
+          <button id="spectateBack" class="secondary">Back</button>
+        </div>
+        <div class="grid two">
+          <div>
+            <h3>Teams</h3>
+            <ul id="spectateTeams" class="list"></ul>
+          </div>
+          <div>
+            <h3>Leaderboard</h3>
+            <ul id="spectateStats" class="list"></ul>
+          </div>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <h3>Fixtures & Results</h3>
+          <div id="spectateFixtures"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- App content (signed-in) -->
+    <main id="appContent" class="container hidden">
+
+      <!-- Home View (single page) -->
+      <section id="homeView">
+        <div class="inline" style="justify-content: space-between; align-items: center; margin-bottom: .75rem;">
+          <h2>Sports</h2>
+        </div>
+    <div id="sportsGrid" class="sports-grid" aria-label="Sports"></div>
+    <div class="card" style="max-width: 880px; margin: 1rem auto 0; text-align: center;">
+          <div class="inline" style="justify-content:center; align-items:center; gap: .75rem; flex-wrap: wrap;">
+      <a id="managePlayersBtn" href="./players.html" class="button-link">Manage Players</a>
+            <button id="openTournamentsInfo" class="secondary">How tournaments work</button>
+          </div>
+        </div>
+        </section>
+
+      <!-- Players View (/players) -->
+      <section id="playersView" class="hidden">
+        <div class="grid two">
+          <div class="card">
+            <h3>Your Players</h3>
+            <ul id="playerList" class="list"></ul>
+          </div>
+      <div class="card">
+    <h3>Player</h3>
+            <form id="playerForm">
+              <div class="row">
+        <label for="playerName">Name</label>
+                <input id="playerName" name="name" required />
+              </div>
+              <div class="row">
+        <label for="playerSurname">Surname</label>
+                <input id="playerSurname" name="surname" required />
+              </div>
+              <div class="row">
+        <label for="playerAge">Age</label>
+                <input id="playerAge" name="age" type="number" min="1" />
+              </div>
+              <div class="row">
+        <label for="playerContact">Contact</label>
+                <input id="playerContact" name="contact" type="tel" />
+              </div>
+              <div class="row">
+        <input type="hidden" id="playerId" name="id" />
+    <button type="submit">Save</button>
+        <button type="button" id="resetPlayerForm" class="secondary">Clear</button>
+              </div>
+              <p id="playerFormMsg" class="muted"></p>
+            </form>
+          </div>
+        </div>
+  </section>
+    </main>
+
+    <!-- Match Details Modal Light (simple) -->
+    <div id="matchDetails" class="modal hidden">
+      <div class="modal-content">
+        <div class="inline" style="justify-content: space-between; align-items: center;">
+          <h3>Match Details</h3>
+          <button id="closeMatchDetails" class="secondary">Close</button>
+        </div>
+        <div id="matchDetailsBody"></div>
+      </div>
+    </div>
+
+    <footer class="app-footer">
+      <small>© <span id="year"></span> Sports Tracker</small>
+    </footer>
+  </body>
+  <script>
+    // Keep year current without needing module import
+    document.addEventListener('DOMContentLoaded', () => {
+      const y = document.getElementById('year');
+      if (y) y.textContent = new Date().getFullYear();
+    });
+  </script>
+  </html>

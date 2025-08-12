@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Players · Sports Tracker</title>
+    <link rel="icon" href="./assets/logo.svg" />
+    <link rel="stylesheet" href="./css/styles.css" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./js/pages/playersPage.js"></script>
+    <script>
+      window.APP_GIS_CLIENT_ID = window.APP_GIS_CLIENT_ID || '169612184657-tq44nbhesnjg0anugbq1i1rt85fbv5pf.apps.googleusercontent.com';
+      window.APP_FIREBASE_API_KEY = window.APP_FIREBASE_API_KEY || 'AIzaSyAXa-MW8RgOf-sk1c2LjMY8iDG_IyK3h1M';
+    </script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img src="./assets/logo.svg" alt="Sports Tracker" class="logo" />
+        <h1>Players</h1>
+      </div>
+      <div class="header-actions">
+        <button id="themeToggle" aria-label="Toggle dark mode">🌙</button>
+        <div id="userPanel" class="user-panel hidden">
+          <img id="userAvatar" class="avatar" alt="User avatar" />
+          <span id="userName"></span>
+          <button id="signOutBtn" class="secondary">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="page-nav">
+        <a href="./index.html">Back</a>
+      </div>
+      <section>
+        <div class="grid two">
+          <div class="card">
+            <h3>Your Players</h3>
+            <ul id="playerList" class="list"></ul>
+          </div>
+          <div class="card">
+            <h3>Player</h3>
+            <form id="playerForm">
+              <div class="row">
+                <label for="playerName">Name</label>
+                <input id="playerName" name="name" required />
+              </div>
+              <div class="row">
+                <label for="playerSurname">Surname</label>
+                <input id="playerSurname" name="surname" required />
+              </div>
+              <div class="row">
+                <label for="playerAge">Age</label>
+                <input id="playerAge" name="age" type="number" min="1" />
+              </div>
+              <div class="row">
+                <label for="playerContact">Contact</label>
+                <input id="playerContact" name="contact" type="tel" />
+              </div>
+              <div class="row">
+                <input type="hidden" id="playerId" name="id" />
+                <button type="submit">Save</button>
+                <button type="button" id="resetPlayerForm" class="secondary">Clear</button>
+              </div>
+              <p id="playerFormMsg" class="muted"></p>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <small>© <span id="year"></span> Sports Tracker</small>
+    </footer>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const y = document.getElementById('year'); if (y) y.textContent = new Date().getFullYear();
+      });
+    </script>
+  </body>
+</html>

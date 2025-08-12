@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tournament · Sports Tracker</title>
+    <link rel="icon" href="./assets/logo.svg" />
+    <link rel="stylesheet" href="./css/styles.css" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./js/shared/bootstrap.js"></script>
+    <script type="module" src="./js/pages/tournamentPage.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img src="./assets/logo.svg" alt="Sports Tracker" class="logo" />
+        <h1 id="tHeader">Tournament</h1>
+      </div>
+      <div class="header-actions">
+        <button id="themeToggle" aria-label="Toggle dark mode">🌙</button>
+        <div id="userPanel" class="user-panel hidden">
+          <img id="userAvatar" class="avatar" alt="User avatar" />
+          <span id="userName"></span>
+          <button id="signOutBtn" class="secondary">Sign out</button>
+        </div>
+      </div>
+    </header>
+    <main class="container" id="appContent">
+      <div class="page-nav">
+        <a id="backLink" href="index.html">Back</a>
+      </div>
+      <section>
+        <div class="card" style="margin-bottom:.75rem;">
+          <h3 id="tTitle">Loading...</h3>
+          <p class="muted" id="tSub"></p>
+          <div id="tConfig" class="muted" style="font-size:.85rem; display:flex; gap:.5rem; flex-wrap:wrap;"></div>
+        </div>
+        <div class="tab-row">
+          <div class="tab active" data-tab="teams">Teams</div>
+          <div class="tab" data-tab="standings">Standings</div>
+          <div class="tab" data-tab="fixtures">Fixtures</div>
+          <div class="tab" data-tab="stats">Stats</div>
+          <div class="tab" data-tab="details">Details / Info</div>
+        </div>
+        <div id="tab-teams" class="tab-panel active">
+          <div class="grid two" id="adminTeamsPanel">
+            <div class="card" id="teamAdminCard">
+              <h4>Manage Teams</h4>
+              <form id="addTeamForm" class="grid two">
+                <div class="row" style="grid-column:1/-1;">
+                  <label for="teamNameCombo">Team Name <span class="req">*</span></label>
+                  <input id="teamNameCombo" list="userTeamsList" placeholder="Type name or select" required />
+                  <datalist id="userTeamsList"></datalist>
+                </div>
+                <div class="row">
+                  <label for="teamGroupInput">Group</label>
+                  <input id="teamGroupInput" placeholder="A" maxlength="3" />
+                </div>
+                <div class="row" style="grid-column:1/-1; display:flex; align-items:center; gap:.5rem;">
+                  <button type="submit" id="teamFormSubmitBtn">Add</button>
+                  <button type="button" id="teamFormClearBtn" class="secondary hidden">Clear</button>
+                  <span id="teamAddMsg" class="muted"></span>
+                </div>
+              </form>
+              <h5 style="margin-top:.75rem;">Teams</h5>
+              <ul id="tTeams" class="item-list"></ul>
+            </div>
+          </div>
+          <div class="card" id="nonAdminTeamsNotice" hidden>
+            <h4>Teams</h4>
+            <ul id="tTeamsPublic" class="item-list"></ul>
+          </div>
+        </div>
+
+        <div id="tab-standings" class="tab-panel">
+          <div class="card">
+            <div class="row" id="standingsSelectors" style="display:flex; gap:.75rem; flex-wrap:wrap;">
+              <div id="groupSelectWrap" hidden>
+                <label for="standingsGroupSelect">Group</label>
+                <select id="standingsGroupSelect"></select>
+              </div>
+              <div id="knockoutRoundWrap" hidden>
+                <label for="knockoutRoundSelect">Round</label>
+                <select id="knockoutRoundSelect"></select>
+              </div>
+            </div>
+            <h4 style="margin-top:.75rem;" id="standingsHeader">Standings</h4>
+            <table id="standingsTable" style="width:100%; border-collapse:collapse;">
+              <thead><tr><th>Team</th><th>GP</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div id="knockoutMatches" class="grid" style="margin-top:1rem;"></div>
+          </div>
+        </div>
+
+        <div id="tab-fixtures" class="tab-panel">
+          <div class="card">
+            <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+              <button type="button" id="generateFixturesBtn">Generate Fixtures</button>
+              <button type="button" id="regenFixturesBtn" class="secondary hidden">Regenerate</button>
+              <span id="fixturesMsg" class="muted"></span>
+            </div>
+            <div id="fixturesList" style="margin-top:.75rem; display:grid; gap:.75rem;"></div>
+          </div>
+        </div>
+
+        <div id="tab-stats" class="tab-panel">
+          <div class="card">
+            <h4>Stats</h4>
+            <div class="grid two" style="gap:1.25rem;">
+              <div>
+                <h5>Goals</h5>
+                <table id="statsGoals" class="stat-table"><thead><tr><th>Player</th><th>G</th></tr></thead><tbody></tbody></table>
+              </div>
+              <div>
+                <h5>Assists</h5>
+                <table id="statsAssists" class="stat-table"><thead><tr><th>Player</th><th>A</th></tr></thead><tbody></tbody></table>
+              </div>
+              <div>
+                <h5>Saves</h5>
+                <table id="statsSaves" class="stat-table"><thead><tr><th>Player</th><th>S</th></tr></thead><tbody></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-details" class="tab-panel">
+          <div class="card">
+            <h4>Details / Info</h4>
+            <div id="detailsInfo"></div>
+            <form id="detailsForm" class="grid two" style="margin-top:1rem;" hidden>
+              <div class="row" style="grid-column:1/-1;">
+                <label for="contactEmail">Contact Email</label>
+                <input id="contactEmail" type="email" placeholder="organizer@example.com" />
+              </div>
+              <div class="row" style="grid-column:1/-1;">
+                <label for="encountersEdit">Encounters (1-4)</label>
+                <input id="encountersEdit" type="number" min="1" max="4" placeholder="1" />
+              </div>
+              <div class="row" style="grid-column:1/-1;">
+                <label for="rulesText">Rules / Notes</label>
+                <textarea id="rulesText" rows="5" placeholder="Tournament rules, notes..." style="resize:vertical;"></textarea>
+              </div>
+              <div class="row" style="grid-column:1/-1; display:flex; gap:.5rem; align-items:center;">
+                <button type="submit">Save Details</button>
+                <span id="detailsMsg" class="muted"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="app-footer">
+      <small>© <span id="year"></span> Sports Tracker</small>
+    </footer>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => { const y=document.getElementById('year'); if (y) y.textContent=new Date().getFullYear(); });
+    </script>
+  </body>
+</html>
