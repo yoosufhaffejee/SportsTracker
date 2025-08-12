@@ -157,8 +157,11 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 /* Standings & stats tables alignment */
 #standingsTable th, #standingsTable td,
 .stat-table th, .stat-table td { padding: 4px 6px; }
-#standingsTable th, #standingsTable td { text-align: right; }
+#standingsTable th, #standingsTable td { text-align: left; }
 #standingsTable th:first-child, #standingsTable td:first-child { text-align: left; }
+/* Group standings dynamic tables */
+#tab-standings .group-standings-block table th,
+#tab-standings .group-standings-block table td { text-align:left; padding:4px 6px; }
 .stat-table th:first-child, .stat-table td:first-child { text-align: left; }
 .stat-table th:last-child, .stat-table td:last-child { text-align: right; }
 

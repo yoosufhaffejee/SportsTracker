@@ -24,6 +24,11 @@ async function createTournament(user, form, sport) {
       config.encounters = encounters;
     }
   }
+  // Advance per group for groups_knockout
+  if (format === 'groups_knockout') {
+    const advEl = form.querySelector('#tAdvance');
+    if (advEl) { let adv = parseInt(advEl.value,10); if (isNaN(adv)||adv<1) adv=1; if (adv>8) adv=8; config.advancePerGroup = adv; }
+  }
   const data = { config, admin: user.uid };
   await writeData(`/tournaments/${code}`, data);
   // Save under user profile
@@ -70,6 +75,8 @@ export function initTournaments(user, appConfig, sportFilter) {
   const formatSelect = document.getElementById('tFormat');
   const encountersRow = document.getElementById('tEncountersRow');
   const encountersLabel = document.getElementById('tEncountersLabel');
+  const advanceRow = document.getElementById('tAdvanceRow');
+  const advanceInput = document.getElementById('tAdvance');
   const tClearBtn = document.getElementById('tAccessClearBtn');
   function syncRequirements() {
     const isJoin = tAction?.value === 'join';
@@ -92,15 +99,20 @@ export function initTournaments(user, appConfig, sportFilter) {
     const tNameInput = document.getElementById('tName');
     if (tNameInput) tNameInput.required = !isJoin; // only required when creating / renaming
     if (formatSelect) formatSelect.required = !isJoin; // format only relevant on create
-    // Encounters visibility & label
+    // Encounters & advance visibility
     if (formatSelect && encountersRow) {
       const fmt = formatSelect.value;
-      const show = ['league','groups_knockout','knockout'].includes(fmt) && !isJoin;
-      encountersRow.hidden = !show;
+      const showEnc = ['league','groups_knockout','knockout'].includes(fmt) && !isJoin;
+      encountersRow.hidden = !showEnc;
       const encountersSelect = document.getElementById('tEncounters');
-      if (encountersSelect) encountersSelect.required = show; // only required if visible
-      if (show && encountersLabel) {
+      if (encountersSelect) encountersSelect.required = showEnc; // only required if visible
+      if (showEnc && encountersLabel) {
         encountersLabel.textContent = (fmt === 'league') ? 'Encounters' : 'Group Stage Encounters';
+      }
+      const showAdv = fmt === 'groups_knockout' && !isJoin;
+      if (advanceRow && advanceInput) {
+        advanceRow.hidden = !showAdv;
+        advanceInput.required = showAdv;
       }
     }
   }
@@ -132,6 +144,12 @@ export function initTournaments(user, appConfig, sportFilter) {
               updateCfg.encounters = val;
             }
           }
+          if (newFormat === 'groups_knockout') {
+            const advEl = document.getElementById('tAdvance');
+            if (advEl) { let adv = parseInt(advEl.value,10); if (isNaN(adv)||adv<1) adv=1; if (adv>8) adv=8; updateCfg.advancePerGroup = adv; }
+          } else {
+            updateCfg.advancePerGroup = null;
+          }
           if (Object.keys(updateCfg).length) {
             await updateData(`/tournaments/${code}/config`, updateCfg);
             await updateData(`/users/${user.uid}/tournaments/created/${code}`, { name: updateCfg.name, format: updateCfg.format });
@@ -149,7 +167,7 @@ export function initTournaments(user, appConfig, sportFilter) {
       } else {
         const code = (document.getElementById('joinCode').value || '').trim().toUpperCase();
         const role = joinRole.value;
-  const exists = await readData(`/tournaments/${code}`).catch(()=>null);
+        const exists = await readData(`/tournaments/${code}`).catch(()=>null);
         if (!exists) throw new Error('not found');
         if (role === 'captain') {
           const teamName = (document.getElementById('teamName').value || '').trim();
@@ -267,7 +285,7 @@ export function initTournaments(user, appConfig, sportFilter) {
     const code = (document.getElementById('spectateCode').value || '').trim().toUpperCase();
     if (!code) return;
     const t = await readData(`/tournaments/${code}`).catch(()=>null);
-  if (!t) { alert('Tournament not found'); return; }
+    if (!t) { alert('Tournament not found'); return; }
     if (t.config && t.config.isPublic === false) {
       alert('This tournament is private. Only participants can view it.');
       return;
@@ -322,9 +340,9 @@ export function initTournaments(user, appConfig, sportFilter) {
     // My (created + joined)
     myList.innerHTML = '';
     const mine = { ...(created||{}), ...(joined||{}), ...(spectating||{}) };
-  let mineItems = Object.keys(mine);
-  // Filter out soft-deleted
-  mineItems = mineItems.filter(c => !mine[c]?.deleted);
+    let mineItems = Object.keys(mine);
+    // Filter out soft-deleted
+    mineItems = mineItems.filter(c => !mine[c]?.deleted);
     if (sportFilter) {
       // Filter by sport; gather codes lacking sport metadata
       const lacking = [];
@@ -353,16 +371,16 @@ export function initTournaments(user, appConfig, sportFilter) {
     for (const code of mineItems) {
       const li = document.createElement('li');
       const rec = created?.[code] || joined?.[code] || spectating?.[code] || {};
-  let roleLabel;
-  if (created?.[code]) roleLabel = 'Admin';
-  else if (joined?.[code]) roleLabel = rec.pending ? 'Pending' : 'Participant';
-  else roleLabel = 'Spectator';
-  const roleBadge = `<span class="badge">${roleLabel}</span>`;
+      let roleLabel;
+      if (created?.[code]) roleLabel = 'Admin';
+      else if (joined?.[code]) roleLabel = rec.pending ? 'Pending' : 'Participant';
+      else roleLabel = 'Spectator';
+      const roleBadge = `<span class="badge">${roleLabel}</span>`;
       const nameDisplay = rec.name ? `${rec.name} (${code})` : code;
       const left = document.createElement('span'); left.innerHTML = `${nameDisplay} ${roleBadge}`;
       const actions = document.createElement('span'); actions.style.display='flex'; actions.style.gap='.4rem';
-  const viewBtn = document.createElement('button'); viewBtn.type='button'; viewBtn.className='icon-btn success'; viewBtn.innerHTML='👁'; viewBtn.title='View';
-  viewBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if (sportFilter) window.location.href = `tournament.html?sport=${encodeURIComponent(sportFilter)}&code=${encodeURIComponent(code)}`; });
+      const viewBtn = document.createElement('button'); viewBtn.type='button'; viewBtn.className='icon-btn success'; viewBtn.innerHTML='👁'; viewBtn.title='View';
+      viewBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if (sportFilter) window.location.href = `tournament.html?sport=${encodeURIComponent(sportFilter)}&code=${encodeURIComponent(code)}`; });
       const editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='icon-btn primary'; editBtn.innerHTML='✎'; editBtn.title='Rename';
       editBtn.addEventListener('click', async (e)=>{
         e.stopPropagation();
@@ -380,12 +398,14 @@ export function initTournaments(user, appConfig, sportFilter) {
           const tFull = await readData(`/tournaments/${code}`);
           tConfig = tFull?.config || {};
         } catch {}
-  if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
+        if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
         if (formatSelect && tConfig?.format) formatSelect.value = tConfig.format;
-        // Prefill encounters if available
+        // Prefill encounters & advance if available
         const encInput = document.getElementById('tEncounters');
         if (encInput && (tConfig?.encounters != null)) encInput.value = tConfig.encounters;
-  const pubEl = document.getElementById('tPublic'); if (pubEl) pubEl.checked = !!tConfig.isPublic;
+        const advInput = document.getElementById('tAdvance');
+        if (advInput && (tConfig?.advancePerGroup != null)) advInput.value = tConfig.advancePerGroup;
+        const pubEl = document.getElementById('tPublic'); if (pubEl) pubEl.checked = !!tConfig.isPublic;
         // Re-run requirement logic to reveal encounters row if needed
         syncRequirements();
         const form = document.getElementById('tournamentAccessForm');

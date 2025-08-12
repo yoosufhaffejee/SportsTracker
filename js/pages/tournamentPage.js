@@ -193,40 +193,50 @@ async function init(user) {
 
   // Standings (approved teams only)
   function renderStandings() {
-    const tbody = document.querySelector('#standingsTable tbody'); if (!tbody) return;
-    tbody.innerHTML='';
+    const standingsCard = document.querySelector('#tab-standings .card');
+    const baseTable = document.getElementById('standingsTable');
+    const tbody = baseTable?.querySelector('tbody');
+    if (!standingsCard || !baseTable || !tbody) return;
     const teams = Object.fromEntries(Object.entries(t.teams||{}).filter(([id,tm])=> tm.approved && !tm.rejected));
     const matches = t.matches||{};
-    const byGroup = groupTeams(teams);
-    const groupSelectWrap = document.getElementById('groupSelectWrap');
-    const groupSelect = document.getElementById('standingsGroupSelect');
-    // Populate groups if any real grouping
-    const groups = Object.keys(byGroup).filter(g=>g && g!=='_UNG');
-    groupSelectWrap.hidden = !groups.length || (cfg.format!=='groups_knockout' && cfg.format!=='league');
-    if (!groupSelectWrap.hidden) {
-      groupSelect.innerHTML='';
-      groups.forEach(g=>{ const opt=document.createElement('option'); opt.value=g; opt.textContent=g; groupSelect.appendChild(opt); });
-    }
-    function doRender(groupKey) {
-      const scopeTeams = groupKey ? byGroup[groupKey] : teams;
-      const filteredMatches = {};
-      for (const [mid,m] of Object.entries(matches)) {
-        if (scopeTeams[m.teamAId] && scopeTeams[m.teamBId]) filteredMatches[mid]=m;
+    // Cleanup any previously injected group tables / summaries
+    standingsCard.querySelectorAll('.group-standings-block').forEach(el=> el.remove());
+    const eliminationSummary = standingsCard.querySelector('#eliminationSummary'); if (eliminationSummary) eliminationSummary.remove();
+    baseTable.classList.remove('hidden');
+    tbody.innerHTML='';
+    if (cfg.format === 'groups_knockout') {
+      const byGroup = groupTeams(teams);
+      const groupKeys = Object.keys(byGroup).filter(g=> g && g!=='_UNG').sort();
+      if (!groupKeys.length) { tbody.innerHTML='<tr><td colspan="9" class="muted">Assign groups to teams to view standings</td></tr>'; }
+      else {
+        baseTable.classList.add('hidden');
+        for (const g of groupKeys) {
+          const wrapper = document.createElement('div'); wrapper.className='group-standings-block'; wrapper.style.marginTop='.75rem';
+          const h = document.createElement('h5'); h.textContent = `Group ${g}`; wrapper.appendChild(h);
+          const table = document.createElement('table'); table.style.width='100%'; table.innerHTML='<thead><tr><th>Team</th><th>GP</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody></tbody>';
+          const gBody = table.querySelector('tbody');
+          const groupMatches = Object.fromEntries(Object.entries(matches).filter(([mid,m])=> m.stage==='group' && m.group===g));
+          const standings = calcStandings(groupMatches, byGroup[g]);
+          if (!standings.length) gBody.innerHTML='<tr><td colspan="9" class="muted">No data</td></tr>';
+          else standings.forEach(row=>{ const gd=row.gf-row.ga; const tr=document.createElement('tr'); tr.innerHTML=`<td>${row.name}</td><td>${row.gp}</td><td>${row.w}</td><td>${row.d}</td><td>${row.l}</td><td>${row.gf}</td><td>${row.ga}</td><td>${gd}</td><td>${row.pts}</td>`; gBody.appendChild(tr); });
+          wrapper.appendChild(table); standingsCard.appendChild(wrapper);
+        }
       }
-      const standings = calcStandings(filteredMatches, scopeTeams);
-      tbody.innerHTML='';
-      if (!standings.length) { tbody.innerHTML = '<tr><td colspan="9" class="muted">No data</td></tr>'; return; }
-      for (const row of standings) {
-        const tr=document.createElement('tr');
-        const gd = row.gf - row.ga;
-        tr.innerHTML = `<td>${row.name}</td><td>${row.gp}</td><td>${row.w}</td><td>${row.d}</td><td>${row.l}</td><td>${row.gf}</td><td>${row.ga}</td><td>${gd}</td><td>${row.pts}</td>`;
-        tbody.appendChild(tr);
+      if (Object.values(matches).some(m=> m.stage==='knockout')) {
+        const summaryDiv = document.createElement('div'); summaryDiv.id='eliminationSummary'; summaryDiv.style.marginTop='1rem';
+        summaryDiv.innerHTML = buildEliminationSummary(teams, matches);
+        standingsCard.appendChild(summaryDiv);
       }
+    } else if (cfg.format === 'knockout') {
+      baseTable.classList.add('hidden');
+      const summaryDiv = document.createElement('div'); summaryDiv.id='eliminationSummary'; summaryDiv.style.marginTop='.75rem';
+      summaryDiv.innerHTML = buildEliminationSummary(teams, matches) || '<div class="muted">No matches yet</div>';
+      standingsCard.appendChild(summaryDiv);
+    } else { // league
+      const standings = calcStandings(matches, teams);
+      if (!standings.length) { tbody.innerHTML='<tr><td colspan="9" class="muted">No data</td></tr>'; }
+      else standings.forEach(row=>{ const gd=row.gf-row.ga; const tr=document.createElement('tr'); tr.innerHTML=`<td>${row.name}</td><td>${row.gp}</td><td>${row.w}</td><td>${row.d}</td><td>${row.l}</td><td>${row.gf}</td><td>${row.ga}</td><td>${gd}</td><td>${row.pts}</td>`; tbody.appendChild(tr); });
     }
-    if (!groupSelectWrap.hidden) {
-      groupSelect.onchange = ()=> doRender(groupSelect.value);
-      doRender(groupSelect.value || groups[0]);
-    } else doRender(null);
   }
 
   // Fixtures (generate, list, edit results + stats)
@@ -241,101 +251,174 @@ async function init(user) {
     t = await readData(`/tournaments/${code}`).catch(()=>t);
     const format = t?.config?.format || cfg.format;
     const encounters = Math.max(1, (t?.config?.encounters || cfg.encounters || 1) * 1);
+    const advancePerGroup = t?.config?.advancePerGroup;
     // Only schedule approved (non-rejected) teams
     const allTeams = Object.entries(t.teams||{})
       .filter(([id,tm])=> tm.approved && !tm.rejected)
       .map(([id,tm])=> ({id, ...tm}));
     if (allTeams.length < 2) { fixturesMsg.textContent='Need at least 2 teams'; return; }
-    const filteredTeamsObj = Object.fromEntries(allTeams.map(t=> [t.id, t]));
-    const grouped = (format === 'groups_knockout') ? groupTeams(filteredTeamsObj) : null;
-    // Index existing by pair (support legacy without ids)
-    const existingIndex = {};
-    for (const [mid,m] of Object.entries(t.matches||{})) {
-      const aId = m.teamAId || m.teamA; const bId = m.teamBId || m.teamB;
-      if (!aId || !bId) continue;
-      const key = [aId,bId].sort().join('|');
-      existingIndex[key] = (existingIndex[key]||0)+1;
-    }
-    const newMatches = {}; let midCounter=0;
-  function schedulePairs(teamsSubset) {
-      for (let i=0;i<teamsSubset.length;i++) {
-        for (let j=i+1;j<teamsSubset.length;j++) {
-          const a = teamsSubset[i]; const b = teamsSubset[j];
-          const key = [a.id,b.id].sort().join('|');
-          const have = existingIndex[key] || 0;
-          const needed = regen ? encounters : Math.max(0, encounters - have);
-          if (needed<=0) continue;
-          for (let k=0;k<needed;k++) {
-            const iterationIndex = regen ? k : have + k; // total index including existing
-            const swap = iterationIndex % 2 === 1; // alternate home/away
-            const home = swap ? b : a;
-            const away = swap ? a : b;
-      newMatches[`m${Date.now()}_${++midCounter}`] = { teamA: home.name, teamB: away.name, teamAId: home.id, teamBId: away.id, createdAt: Date.now(), encounter: iterationIndex + 1 };
-          }
+    // Knockout direct
+    if (format === 'knockout') {
+      if (!regen && Object.values(t.matches||{}).some(m=> m.stage==='knockout')) { fixturesMsg.textContent='Knockout fixtures already generated'; return; }
+      const teamsShuffled = [...allTeams].sort(()=> Math.random()-0.5);
+      const n = teamsShuffled.length;
+      const roundLabel = knockoutRoundLabel(n);
+      const newMatches = {};
+      for (let i=0;i<n;i+=2) {
+        if (i+1>=n) {
+          newMatches[`m${Date.now()}_${i}`] = { teamA: teamsShuffled[i].name, teamAId: teamsShuffled[i].id, bye:true, stage:'knockout', round: roundLabel, roundNumber:1, createdAt: Date.now() };
+        } else {
+          const a=teamsShuffled[i], b=teamsShuffled[i+1];
+          newMatches[`m${Date.now()}_${i}`] = { teamA:a.name, teamB:b.name, teamAId:a.id, teamBId:b.id, stage:'knockout', round: roundLabel, roundNumber:1, createdAt: Date.now() };
         }
       }
+      await updateData(`/tournaments/${code}`, { matches: regen? newMatches : { ...(t.matches||{}), ...newMatches } });
+      fixturesMsg.textContent='Knockout fixtures generated';
+      refresh(); return;
     }
-    if (grouped) {
-      for (const [g, groupTeamsObj] of Object.entries(grouped)) {
-        const arr = Object.entries(groupTeamsObj).map(([id,tm])=> ({id, ...tm}));
-        schedulePairs(arr);
+    // Groups + Knockout
+    const filteredTeamsObj = Object.fromEntries(allTeams.map(t=> [t.id, t]));
+    let grouped = (format === 'groups_knockout') ? groupTeams(filteredTeamsObj) : null;
+    if (format === 'groups_knockout') {
+      if (allTeams.length < 4) { fixturesMsg.textContent='Need at least 4 teams for groups'; return; }
+      const unGrouped = allTeams.filter(ti=> !ti.group);
+      if (unGrouped.length) {
+        const groupCount = Math.max(2, Math.ceil(allTeams.length / 4));
+        const groupNames = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.slice(0, groupCount).split('');
+        let idx=0;
+        for (const tm of allTeams) {
+          if (!tm.group) {
+            const g = groupNames[idx % groupCount]; idx++;
+            await updateData(`/tournaments/${code}/teams/${tm.id}`, { group: g });
+            tm.group = g;
+          }
+        }
+        t = await readData(`/tournaments/${code}`).catch(()=>t);
+        grouped = groupTeams(Object.fromEntries(allTeams.map(tt=> [tt.id, tt])));
       }
-    } else schedulePairs(allTeams);
-    if (!Object.keys(newMatches).length) {
-      fixturesMsg.textContent = regen ? 'No teams to schedule' : 'Already at encounters target';
-      return;
+      if (advancePerGroup != null) {
+        const groupSizes = Object.values(grouped).map(g=> Object.keys(g).length);
+        if (groupSizes.some(sz=> advancePerGroup > sz)) { fixturesMsg.textContent='Advance per group exceeds a group size'; return; }
+      }
+      const hasKnockout = Object.values(t.matches||{}).some(m=> m.stage==='knockout');
+      const hasGroupMatches = Object.values(t.matches||{}).some(m=> m.stage==='group');
+      if (!hasGroupMatches || regen) {
+        const newMatches = {}; let midCounter=0;
+        function scheduleGroupPairs(arr, groupName) {
+          for (let i=0;i<arr.length;i++) {
+            for (let j=i+1;j<arr.length;j++) {
+              const a = arr[i]; const b = arr[j];
+              for (let k=0;k<encounters;k++) {
+                const swap = k % 2 === 1; const home = swap? b: a; const away= swap? a: b;
+                newMatches[`m${Date.now()}_${groupName}_${++midCounter}`] = { teamA: home.name, teamB: away.name, teamAId: home.id, teamBId: away.id, createdAt: Date.now(), encounter: k+1, stage:'group', group: groupName };
+              }
+            }
+          }
+        }
+        for (const [g, groupTeamsObj] of Object.entries(grouped)) {
+          const arr = Object.entries(groupTeamsObj).map(([id,tm])=> ({id, ...tm}));
+          scheduleGroupPairs(arr, g);
+        }
+        await updateData(`/tournaments/${code}`, { matches: regen? newMatches : { ...(t.matches||{}), ...newMatches } });
+        fixturesMsg.textContent = 'Group fixtures generated';
+        refresh(); return;
+      }
+      if (!hasKnockout) {
+        const groupMatches = Object.values(t.matches||{}).filter(m=> m.stage==='group');
+        const incomplete = groupMatches.some(m=> !m.scores || m.scores.a==null || m.scores.b==null);
+        if (incomplete) { fixturesMsg.textContent='Complete all group matches before knockout'; return; }
+        const byGroupFull = {};
+        for (const [gid,gTeams] of Object.entries(grouped)) {
+          const gm = Object.fromEntries(Object.entries(t.matches||{}).filter(([mid,m])=> m.stage==='group' && m.group===gid));
+          byGroupFull[gid] = calcStandings(gm, gTeams);
+        }
+        const seeds = [];
+        const groupOrder = Object.keys(byGroupFull).sort();
+        const maxPos = Math.max(...groupOrder.map(g=> byGroupFull[g].length));
+        for (let pos=0; pos<maxPos; pos++) {
+          for (const g of groupOrder) {
+            if (byGroupFull[g][pos]) seeds.push(byGroupFull[g][pos]);
+          }
+        }
+        const adv = advancePerGroup || 1;
+        const advanced = seeds.filter((row,idx)=> Math.floor(idx / groupOrder.length) < adv).slice(0, (adv * groupOrder.length));
+        const N = advanced.length;
+        if (![2,4,8,16,32].includes(N)) { fixturesMsg.textContent='Advanced teams count not bracket-compatible'; return; }
+        const roundLabel = knockoutRoundLabel(N);
+        const newMatches = {}; let c=0;
+        for (let i=0;i<N/2;i++) {
+          const a = advanced[i]; const b = advanced[N-1-i];
+          newMatches[`m${Date.now()}_KO_${++c}`] = { teamA:a.name, teamB:b.name, teamAId:a.teamId, teamBId:b.teamId, stage:'knockout', round: roundLabel, roundNumber:1, createdAt: Date.now() };
+        }
+        await updateData(`/tournaments/${code}`, { matches: { ...(t.matches||{}), ...newMatches } });
+        fixturesMsg.textContent='Knockout fixtures generated';
+        refresh(); return;
+      }
     }
-    if (regen) await updateData(`/tournaments/${code}`, { matches: newMatches });
-    else await updateData(`/tournaments/${code}`, { matches: { ...(t.matches||{}), ...newMatches } });
-    fixturesMsg.textContent = regen ? 'Fixtures regenerated' : 'Fixtures generated';
-    refresh();
+    fixturesMsg.textContent='Nothing to generate';
   }
 
   function renderFixtures() {
     if (!fixturesList) return;
     fixturesList.innerHTML='';
-    const matches = Object.entries(t.matches||{}).sort((a,b)=> (a[1].createdAt||0)-(b[1].createdAt||0));
-    if (!matches.length) { fixturesList.innerHTML='<div class="muted">No fixtures yet</div>'; return; }
+    const matchesRaw = Object.entries(t.matches||{}).sort((a,b)=> (a[1].createdAt||0)-(b[1].createdAt||0));
+    if (!matchesRaw.length) { fixturesList.innerHTML='<div class="muted">No fixtures yet</div>'; return; }
+    const groupStageMatches = matchesRaw.filter(([mid,m])=> m.stage==='group');
+    const knockoutMatches = matchesRaw.filter(([mid,m])=> m.stage==='knockout');
+    if (groupStageMatches.length) {
+      const byGroup = {};
+      groupStageMatches.forEach(([mid,m])=>{ if(!byGroup[m.group]) byGroup[m.group]=[]; byGroup[m.group].push([mid,m]); });
+      Object.keys(byGroup).sort().forEach(g=>{
+        const heading = document.createElement('h4'); heading.textContent = `Group ${g}`; heading.style.margin='1rem 0 .5rem'; fixturesList.appendChild(heading);
+        byGroup[g].sort((a,b)=> (a[1].encounter||1)-(b[1].encounter||1));
+        byGroup[g].forEach(([mid,m])=> fixturesList.appendChild(renderMatchCard(mid,m)) );
+      });
+    }
+    if (knockoutMatches.length) {
+      const byRound = {};
+      knockoutMatches.forEach(([mid,m])=>{ const rn=m.roundNumber||1; if(!byRound[rn]) byRound[rn]=[]; byRound[rn].push([mid,m]); });
+      Object.keys(byRound).map(n=> parseInt(n,10)).sort((a,b)=> a-b).forEach(rn=>{
+        const heading = document.createElement('h4'); heading.textContent = byRound[rn][0][1].round || `Round ${rn}`; heading.style.margin='1rem 0 .5rem'; fixturesList.appendChild(heading);
+        byRound[rn].forEach(([mid,m])=> fixturesList.appendChild(renderMatchCard(mid,m)) );
+      });
+    }
+    if (!groupStageMatches.length && !knockoutMatches.length) {
+      const matches = matchesRaw; const pairEncounterCount={}; const rounds={};
+      for (const [mid,m] of matches) { const key=[m.teamAId||m.teamA,m.teamBId||m.teamB].sort().join('|'); let encounterNo=m.encounter; if(!encounterNo){ encounterNo=(pairEncounterCount[key]||0)+1; pairEncounterCount[key]=encounterNo;} else { pairEncounterCount[key]=Math.max(pairEncounterCount[key]||0,encounterNo);} if(!rounds[encounterNo]) rounds[encounterNo]=[]; rounds[encounterNo].push([mid,m]); }
+      const roundNumbers = Object.keys(rounds).map(n=> parseInt(n,10)).sort((a,b)=> a-b);
+      for (const rNum of roundNumbers) { const heading=document.createElement('h4'); heading.textContent=`Round ${rNum}`; heading.style.margin='1rem 0 .5rem'; fixturesList.appendChild(heading); for (const [mid,m] of rounds[rNum]) fixturesList.appendChild(renderMatchCard(mid,m)); }
+    }
     const regenBtn = document.getElementById('regenFixturesBtn');
-    regenBtn?.classList.toggle('hidden', !isAdmin || !matches.length);
-    // Map pair -> last assigned encounter index if legacy matches lack encounter
-    const pairEncounterCount = {};
-    // Group matches by encounter (round)
-    const rounds = {};
-    for (const [mid, m] of matches) {
-      const key = [m.teamAId||m.teamA, m.teamBId||m.teamB].sort().join('|');
-      let encounterNo = m.encounter;
-      if (!encounterNo) {
-        encounterNo = (pairEncounterCount[key]||0) + 1;
-        pairEncounterCount[key] = encounterNo;
-      } else {
-        // keep pairEncounterCount in sync in case subsequent legacy ones appear
-        pairEncounterCount[key] = Math.max(pairEncounterCount[key]||0, encounterNo);
-      }
-      if (!rounds[encounterNo]) rounds[encounterNo] = [];
-      rounds[encounterNo].push([mid, m]);
+    regenBtn?.classList.toggle('hidden', !isAdmin || !matchesRaw.length);
+  }
+
+  function renderMatchCard(mid,m) {
+    const card = document.createElement('div'); card.className='card'; card.style.padding='.6rem .75rem';
+    if (m.bye) { card.innerHTML = `<div><strong>${m.teamA}</strong> advances (bye)</div>`; return card; }
+    const scoreStr = (m.scores && m.scores.a!=null && m.scores.b!=null) ? `<strong>${m.scores.a}-${m.scores.b}</strong>` : '<span class="muted">TBD</span>';
+    card.innerHTML = `<div style='display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap;'>
+      <div><strong>${m.teamA}</strong> vs <strong>${m.teamB||''}</strong> ${scoreStr}</div>
+      <div class='muted' style='font-size:.75rem;'>${m.date ? new Date(m.date).toLocaleDateString():''}</div>
+      </div>`;
+    if (isAdmin && !m.bye) {
+      const edit=document.createElement('button'); edit.type='button'; edit.className='icon-btn primary'; edit.innerHTML='✎'; edit.title='Enter result';
+      edit.addEventListener('click', ()=> editMatch(mid,m));
+      card.appendChild(edit);
     }
-    const roundNumbers = Object.keys(rounds).map(n=> parseInt(n,10)).sort((a,b)=> a-b);
-    for (const rNum of roundNumbers) {
-      // Heading
-      const heading = document.createElement('h4'); heading.textContent = `Round ${rNum}`; heading.style.margin = '1rem 0 .5rem';
-      fixturesList.appendChild(heading);
-      // Round fixtures
-      for (const [mid, m] of rounds[rNum]) {
-        const card = document.createElement('div'); card.className='card'; card.style.padding='.6rem .75rem';
-        const scoreStr = (m.scores && m.scores.a!=null && m.scores.b!=null) ? `<strong>${m.scores.a}-${m.scores.b}</strong>` : '<span class="muted">TBD</span>';
-        card.innerHTML = `<div style='display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap;'>
-          <div><strong>${m.teamA}</strong> vs <strong>${m.teamB}</strong> ${scoreStr}</div>
-          <div class='muted' style='font-size:.75rem;'>${m.date ? new Date(m.date).toLocaleDateString():''}</div>
-          </div>`;
-        if (isAdmin) {
-          const edit=document.createElement('button'); edit.type='button'; edit.className='icon-btn primary'; edit.innerHTML='✎'; edit.title='Enter result';
-          edit.addEventListener('click', ()=> editMatch(mid,m));
-          card.appendChild(edit);
-        }
-        fixturesList.appendChild(card);
-      }
-    }
+    return card;
+  }
+
+  function knockoutRoundLabel(n) { return ({2:'Final',4:'Semi Final',8:'Quarter Final',16:'Round of 16',32:'Round of 32'})[n] || `Round of ${n}`; }
+
+  function buildEliminationSummary(teams, matches) {
+    const knockoutMatches = Object.values(matches).filter(m=> m.stage==='knockout' && !m.bye);
+    if (!knockoutMatches.length) return '<div class="muted">No knockout matches yet</div>';
+    const losers = new Set(); const winners = new Set();
+    knockoutMatches.forEach(m=>{ if (m.scores && m.scores.a!=null && m.scores.b!=null) { if (m.scores.a > m.scores.b) { winners.add(m.teamAId); losers.add(m.teamBId); } else if (m.scores.b > m.scores.a) { winners.add(m.teamBId); losers.add(m.teamAId); } } });
+    const teamEntries = Object.entries(teams);
+    const eliminated = teamEntries.filter(([id])=> losers.has(id));
+    const remaining = teamEntries.filter(([id])=> !losers.has(id));
+    return `<div><strong>Remaining:</strong> ${remaining.map(([id,tm])=> tm.name).join(', ')||'None'}</div><div style='margin-top:.25rem;'><strong>Eliminated:</strong> ${eliminated.map(([id,tm])=> tm.name).join(', ')||'None'}</div>`;
   }
 
   function editMatch(mid, m) {
@@ -459,8 +542,13 @@ async function init(user) {
     else if (t.admin) lines.push(`<div><strong>Admin:</strong> ${t.admin}</div>`);
     if (c.rules) lines.push(`<div style='white-space:pre-wrap;'>${c.rules}</div>`);
     wrap.innerHTML = lines.join('') || '<div class="muted">No details yet</div>';
+    const formEl = document.getElementById('detailsForm');
+    if (formEl) formEl.hidden = !isAdmin; // ensure enforced each refresh
     if (isAdmin) {
       const rulesEl = document.getElementById('rulesText'); if (rulesEl) rulesEl.value = c.rules||'';
+    } else {
+      // Clear textarea value for non-admin (avoids accidental exposure if toggled visible via devtools)
+      const rulesEl = document.getElementById('rulesText'); if (rulesEl) rulesEl.value='';
     }
   }
 

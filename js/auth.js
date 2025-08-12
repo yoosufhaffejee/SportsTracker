@@ -17,10 +17,20 @@ function emitAuth() {
 
 // ---- Lightweight Firebase ID token refresh (approx every 50m) ----
 let refreshTimer = null;
-function scheduleTokenRefresh(refreshToken) {
+function decodeExp(idToken) {
+  try { const payload = parseJwt(idToken); return payload?.exp ? payload.exp * 1000 : null; } catch { return null; }
+}
+function scheduleTokenRefresh(refreshToken, idToken) {
   if (!refreshToken) return;
   if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => refreshFirebaseIdToken(refreshToken), 50 * 60 * 1000);
+  // Aim to refresh 5 minutes before expiry (or default 50m if exp unknown)
+  let delay = 50 * 60 * 1000; // fallback
+  const expMs = idToken ? decodeExp(idToken) : null;
+  if (expMs) {
+    delay = expMs - Date.now() - (5 * 60 * 1000); // 5 min early
+    if (delay < 30 * 1000) delay = 30 * 1000; // never shorter than 30s
+  }
+  refreshTimer = setTimeout(() => refreshFirebaseIdToken(refreshToken), delay);
 }
 
 async function refreshFirebaseIdToken(refreshToken) {
@@ -40,9 +50,9 @@ async function refreshFirebaseIdToken(refreshToken) {
     }
     if (json.refresh_token) {
       localStorage.setItem('firebase_refresh_token', json.refresh_token);
-      scheduleTokenRefresh(json.refresh_token);
+      scheduleTokenRefresh(json.refresh_token, json.id_token);
     } else {
-      scheduleTokenRefresh(refreshToken);
+      scheduleTokenRefresh(refreshToken, json.id_token);
     }
   } catch (e) {
     refreshTimer = setTimeout(() => refreshFirebaseIdToken(refreshToken), 5 * 60 * 1000);
@@ -61,7 +71,15 @@ export function initAuth() {
   if (storedIdToken) {
     setAuthToken(storedIdToken);
     const rt = localStorage.getItem('firebase_refresh_token');
-    if (rt) scheduleTokenRefresh(rt);
+    if (rt) {
+      const expMs = decodeExp(storedIdToken);
+      if (expMs && Date.now() >= expMs - 60*1000) {
+        // Token expired or within 1m of expiry: refresh immediately
+        refreshFirebaseIdToken(rt);
+      } else {
+        scheduleTokenRefresh(rt, storedIdToken);
+      }
+    }
   }
   emitAuth();
 }
@@ -94,12 +112,12 @@ async function handleCredentialResponse(resp) {
   };
   currentUser = user;
   localStorage.setItem('gis_profile', JSON.stringify(user));
-  if (firebaseIdToken) {
-    setAuthToken(firebaseIdToken);
-    localStorage.setItem('firebase_id_token', firebaseIdToken);
+    if (firebaseIdToken) {
+      setAuthToken(firebaseIdToken);
+      localStorage.setItem('firebase_id_token', firebaseIdToken);
       if (refreshToken) {
         localStorage.setItem('firebase_refresh_token', refreshToken);
-        scheduleTokenRefresh(refreshToken);
+        scheduleTokenRefresh(refreshToken, firebaseIdToken);
       }
   } else {
     setAuthToken(null);

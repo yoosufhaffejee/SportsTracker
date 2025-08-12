@@ -14,7 +14,7 @@
         "friendlies": { "$sport": { "$fid": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } } },
         "history": { "$hid": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
         "tournaments": {
-          "joined": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
+          "joined": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && (auth.uid == $uid || root.child('tournaments').child($code).child('admin').val() === auth.uid)" } },
             "created": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
             "spectating": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } }
         }
@@ -25,7 +25,7 @@
       "$code": {
         ".read": "root.child('tournaments').child($code).child('config').child('isPublic').val() === true || auth != null",
         ".write": "auth != null && ((!data.exists() && newData.child('admin').val() === auth.uid) || data.child('admin').val() === auth.uid)",
-        "config": { ".read": true, ".write": "auth != null && data.child('admin').val() === auth.uid" },
+  "config": { ".read": true, ".write": "auth != null && root.child('tournaments').child($code).child('admin').val() === auth.uid" },
         "teams": {
           "$teamId": {
             ".write": "auth != null && (root.child('tournaments').child($code).child('admin').val() === auth.uid || (!data.exists() && newData.child('captain').val() === auth.uid))"
