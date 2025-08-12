@@ -59,6 +59,9 @@ img { max-width: 100%; display: block; }
 button, input, select { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: .5rem; padding: .5rem .75rem; }
 button { cursor: pointer; }
 button.secondary { background: transparent; }
+button.primary { background:#0d6efd; border-color:#0d6efd; color:#fff; }
+button.success { background: var(--ok); border-color: var(--ok); color:#fff; }
+button.primary:hover, button.success:hover { filter: brightness(1.1); }
 button:disabled { opacity: .6; cursor: not-allowed; }
 
 .card { background: var(--card); border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
@@ -79,6 +82,7 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .ratings .rating .inline { align-items: center; }
 .ratings input[type="range"] { width: 100%; }
 .ratings button { min-width: 32px; }
+.ratings .snapshot-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.5rem; }
 .chart-wrap { background: var(--bg-elev); border: 1px solid var(--border); border-radius: .5rem; padding: .5rem; }
 
 /* Sports Grid */

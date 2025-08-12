@@ -1,0 +1,42 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        "profile": { ".read": true, ".write": "auth != null && auth.uid == $uid" },
+        "players": { "$playerId": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
+        "playersExtra": { "$sport": { "$playerId": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } } },
+        "teams": { "$sport": { "$teamId": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } } },
+        "friendlies": { "$sport": { "$fid": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } } },
+        "history": { "$hid": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
+        "tournaments": {
+          "joined": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
+            "created": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } },
+            "spectating": { "$code": { ".read": "auth != null && auth.uid == $uid", ".write": "auth != null && auth.uid == $uid" } }
+        }
+      }
+    },
+
+    "tournaments": {
+      "$code": {
+        ".read": "root.child('tournaments').child($code).child('config').child('isPublic').val() === true || auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('admin').val() === auth.uid) || data.child('admin').val() === auth.uid)",
+        "config": { ".read": true, ".write": "auth != null && data.child('admin').val() === auth.uid" },
+        "teams": {
+          "$teamId": {
+            ".write": "auth != null && (root.child('tournaments').child($code).child('admin').val() === auth.uid || (!data.exists() && newData.child('captain').val() === auth.uid))"
+          }
+        },
+        "matches": {
+          "$matchId": {
+            ".write": "auth != null && root.child('tournaments').child($code).child('admin').val() === auth.uid"
+          }
+        }
+      }
+    }
+  }
+}

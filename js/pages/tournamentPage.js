@@ -436,29 +436,31 @@ async function init(user) {
   const detailsForm = document.getElementById('detailsForm');
   detailsForm?.addEventListener('submit', async (e)=>{
     e.preventDefault();
-  const contact = (document.getElementById('contactEmail').value||'').trim();
-  const rules = (document.getElementById('rulesText').value||'').trim();
-  let encountersVal = parseInt((document.getElementById('encountersEdit').value||'').trim(),10);
-  if (isNaN(encountersVal) || encountersVal < 1) encountersVal = cfg.encounters || 1;
-  if (encountersVal > 4) encountersVal = 4;
-  await updateData(`/tournaments/${code}/config`, { contact, rules, encounters: encountersVal });
+    const rules = (document.getElementById('rulesText').value||'').trim();
+    await updateData(`/tournaments/${code}/config`, { rules });
     document.getElementById('detailsMsg').textContent='Saved';
     refresh();
   });
 
-  function renderDetails() {
+  async function renderDetails() {
     const wrap = document.getElementById('detailsInfo'); if (!wrap) return;
     wrap.innerHTML='';
     const c = t.config||{};
     const lines = [];
-    if (c.contact) lines.push(`<div><strong>Contact:</strong> ${c.contact}</div>`);
+    // Fetch admin user profile to show name & email (fallback to id)
+    let adminName = ''; let adminEmail = '';
+    if (t.admin){
+      try {
+        const adminProfile = await readData(`/users/${t.admin}/profile`).catch(()=>null);
+        if (adminProfile){ adminName = adminProfile.displayName || adminProfile.name || ''; adminEmail = adminProfile.email || ''; }
+      } catch(e) { /* ignore */ }
+    }
+    if (adminName) lines.push(`<div><strong>Admin:</strong> ${adminName}${adminEmail? ' ('+adminEmail+')':''}</div>`);
+    else if (t.admin) lines.push(`<div><strong>Admin:</strong> ${t.admin}</div>`);
     if (c.rules) lines.push(`<div style='white-space:pre-wrap;'>${c.rules}</div>`);
-    lines.push(`<div><strong>Admin:</strong> ${t.admin}</div>`);
     wrap.innerHTML = lines.join('') || '<div class="muted">No details yet</div>';
     if (isAdmin) {
-      const contactEl = document.getElementById('contactEmail'); if (contactEl) contactEl.value = c.contact||'';
       const rulesEl = document.getElementById('rulesText'); if (rulesEl) rulesEl.value = c.rules||'';
-      const encEl = document.getElementById('encountersEdit'); if (encEl) encEl.value = c.encounters || 1;
     }
   }
 

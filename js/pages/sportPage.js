@@ -264,33 +264,18 @@ function initPlayerExtras(user, sport) {
   const pos = document.getElementById('playerPosition');
   const alt = document.getElementById('playerAltPositions');
   const msg = document.getElementById('playerExtraMsg');
-  const list = document.getElementById('playerExtraList');
   if (!form || !select) return;
 
   async function loadPlayers() {
     // reuse players list under /users/{uid}/players
     const data = await readData(`/users/${user.uid}/players`).catch(()=>({}));
-    select.innerHTML='';
+    select.innerHTML='<option value="">Select a player</option>';
     const entries = Object.entries(data||{}).sort((a,b)=> (a[1].name||'').localeCompare(b[1].name||''));
     if (!entries.length) { const opt=document.createElement('option'); opt.textContent='No players'; opt.disabled=true; select.appendChild(opt); return; }
     for (const [pid,p] of entries) {
       const opt = document.createElement('option');
       opt.value=pid; opt.textContent=`${p.name||''} ${p.surname||''}`.trim()||pid;
       select.appendChild(opt);
-    }
-  }
-
-  async function renderExtras() {
-    if (!list) return;
-    list.innerHTML='<li class="muted">Loading…</li>';
-    const data = await readData(`/users/${user.uid}/playersExtra/${sport}`).catch(()=>({}));
-    const entries = Object.entries(data||{});
-    if (!entries.length) { list.innerHTML='<li class="muted">None yet</li>'; return; }
-    list.innerHTML='';
-    for (const [pid, info] of entries) {
-      const li = document.createElement('li');
-      li.innerHTML = `<span>${pid}</span><span class="muted">${info.position||''} ${(info.altPositions||[]).join(', ')}</span>`;
-      list.appendChild(li);
     }
   }
 
@@ -301,10 +286,18 @@ function initPlayerExtras(user, sport) {
     const altPositions = (alt.value||'').split(',').map(s=>s.trim()).filter(Boolean);
     await updateData(`/users/${user.uid}/playersExtra/${sport}/${pid}`, { position, altPositions, updatedAt: Date.now() });
     msg.textContent='Saved';
+    // Keep values to reflect saved state
+  });
+  select.addEventListener('change', async ()=>{
+    msg.textContent='';
     pos.value=''; alt.value='';
-    renderExtras();
+    const pid = select.value; if (!pid) return;
+    const existing = await readData(`/users/${user.uid}/playersExtra/${sport}/${pid}`).catch(()=>null);
+    if (existing){
+      pos.value = existing.position || '';
+      alt.value = (existing.altPositions||[]).join(', ');
+    }
   });
 
   loadPlayers();
-  renderExtras();
 }

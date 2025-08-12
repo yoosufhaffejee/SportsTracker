@@ -15,12 +15,53 @@ function emitAuth() {
   for (const cb of authListeners) cb(currentUser);
 }
 
+// ---- Lightweight Firebase ID token refresh (approx every 50m) ----
+let refreshTimer = null;
+function scheduleTokenRefresh(refreshToken) {
+  if (!refreshToken) return;
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => refreshFirebaseIdToken(refreshToken), 50 * 60 * 1000);
+}
+
+async function refreshFirebaseIdToken(refreshToken) {
+  const apiKey = window.APP_FIREBASE_API_KEY || '';
+  if (!apiKey || !refreshToken) return;
+  try {
+    const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken })
+    });
+    if (!res.ok) throw new Error('refresh failed');
+    const json = await res.json();
+    if (json.id_token) {
+      setAuthToken(json.id_token);
+      localStorage.setItem('firebase_id_token', json.id_token);
+    }
+    if (json.refresh_token) {
+      localStorage.setItem('firebase_refresh_token', json.refresh_token);
+      scheduleTokenRefresh(json.refresh_token);
+    } else {
+      scheduleTokenRefresh(refreshToken);
+    }
+  } catch (e) {
+    refreshTimer = setTimeout(() => refreshFirebaseIdToken(refreshToken), 5 * 60 * 1000);
+  }
+}
+
 export function initAuth() {
   // If you later wire Firebase Auth, sync its user here
   // For now, use GIS ID token to derive a session; store in localStorage
   const saved = localStorage.getItem('gis_profile');
   if (saved) {
     try { currentUser = JSON.parse(saved); } catch {}
+  }
+  // Restore Firebase ID token & schedule refresh if available
+  const storedIdToken = localStorage.getItem('firebase_id_token');
+  if (storedIdToken) {
+    setAuthToken(storedIdToken);
+    const rt = localStorage.getItem('firebase_refresh_token');
+    if (rt) scheduleTokenRefresh(rt);
   }
   emitAuth();
 }
@@ -56,7 +97,10 @@ async function handleCredentialResponse(resp) {
   if (firebaseIdToken) {
     setAuthToken(firebaseIdToken);
     localStorage.setItem('firebase_id_token', firebaseIdToken);
-    if (refreshToken) localStorage.setItem('firebase_refresh_token', refreshToken);
+      if (refreshToken) {
+        localStorage.setItem('firebase_refresh_token', refreshToken);
+        scheduleTokenRefresh(refreshToken);
+      }
   } else {
     setAuthToken(null);
   }
