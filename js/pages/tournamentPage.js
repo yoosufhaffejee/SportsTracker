@@ -783,13 +783,25 @@ async function init(user) {
     let adminName = ''; let adminEmail = '';
     if (t.admin){
       try {
-        const adminProfile = await readData(`/users/${t.admin}/profile`).catch(()=>null);
-        if (adminProfile){ adminName = adminProfile.displayName || adminProfile.name || ''; adminEmail = adminProfile.email || ''; }
+        let adminProfile = await readData(`/users/${t.admin}/profile`).catch(()=>null);
+        if (!adminProfile) {
+          // Fallback: root user record
+          const rootUser = await readData(`/users/${t.admin}`).catch(()=>null);
+          if (rootUser && typeof rootUser === 'object') {
+            adminProfile = rootUser.profile || rootUser;
+          }
+        }
+        if (adminProfile){
+          adminName = adminProfile.displayName || adminProfile.name || '';
+          adminEmail = adminProfile.email || adminProfile.contact || '';
+        }
       } catch(e) { /* ignore */ }
     }
     if (adminName) lines.push(`<div><strong>Admin:</strong> ${adminName}${adminEmail? ' ('+adminEmail+')':''}</div>`);
     else if (t.admin) lines.push(`<div><strong>Admin:</strong> ${t.admin}</div>`);
-    if (c.rules) lines.push(`<div style='white-space:pre-wrap;'>${c.rules}</div>`);
+    // Insert rules display block (always visible label; content below)
+    const rulesBlockId = 'rulesDisplayBlock';
+    lines.push(`<div id='${rulesBlockId}' style='margin-top:.5rem;'><div><strong>Rules / Notes</strong></div><div id='rulesDisplay' style='white-space:pre-wrap; margin-top:.25rem;'>${c.rules?c.rules:'<span class="muted">No rules yet</span>'}</div></div>`);
     wrap.innerHTML = lines.join('') || '<div class="muted">No details yet</div>';
     const formEl = document.getElementById('detailsForm');
     if (formEl) formEl.hidden = !isAdmin; // ensure enforced each refresh
@@ -804,6 +816,7 @@ async function init(user) {
         rulesEl.classList.add('hidden');
         const saveBtn = document.querySelector('#detailsForm button[type="submit"]');
         if (saveBtn) saveBtn.classList.add('hidden');
+        const label = document.querySelector('label[for="rulesText"]'); if (label) label.classList.add('hidden');
       }
     }
   }

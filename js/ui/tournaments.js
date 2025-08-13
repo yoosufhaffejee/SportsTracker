@@ -296,7 +296,12 @@ export function initTournaments(user, appConfig, sportFilter) {
       });
       reject.addEventListener('click', async ()=>{
   await updateData(`/tournaments/${code}/teams/${tid}`, { rejected:true, rejectedAt: Date.now() });
-  if (tm.requesterUid) await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected', rejectedAt: Date.now() });
+  if (tm.requesterUid) {
+    await updateData(`/users/${tm.requesterUid}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected', rejectedAt: Date.now() });
+  } else if (tm.captain) {
+    // Fallback: update by captain id if requesterUid not stored (legacy teams)
+    try { await updateData(`/users/${tm.captain}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected', rejectedAt: Date.now() }); } catch {}
+  }
         const fresh = await adminLoad(code); renderManage(fresh, code);
       });
       actions.append(approve, reject);
@@ -393,19 +398,21 @@ export function initTournaments(user, appConfig, sportFilter) {
       readData(`/users/${user.uid}/tournaments/spectating`).catch(()=>({})),
     ]);
     // Reconcile any stale 'pending' flags by checking tournament team approval.
-    const pendingCodes = Object.entries(joined||{}).filter(([code, rec])=> rec?.pending).map(([code])=> code);
+  const pendingCodes = Object.entries(joined||{}).filter(([code, rec])=> rec?.pending || rec?.rejected).map(([code])=> code);
     if (pendingCodes.length) {
       await Promise.all(pendingCodes.map(async code => {
         try {
           const t = await readData(`/tournaments/${code}`).catch(()=>null);
           if (t?.teams) {
-            const approvedTeam = Object.values(t.teams).find(tm=> tm.captain===user.uid && tm.approved === true && !tm.rejected);
-            if (approvedTeam && joined[code]?.pending) {
-              // Update local object and persist correction
-              joined[code].pending = false;
-              joined[code].approved = true;
-              joined[code].status = 'approved';
-              await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { pending:false, approved:true, status:'approved' });
+            const myTeam = Object.values(t.teams).find(tm=> tm.captain===user.uid);
+            if (myTeam) {
+              if (myTeam.approved === true && !myTeam.rejected && joined[code]?.pending) {
+                joined[code].pending = false; joined[code].approved = true; joined[code].rejected = false; joined[code].status='approved';
+                await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { pending:false, approved:true, rejected:false, status:'approved' });
+              } else if (myTeam.rejected === true && !joined[code]?.rejected) {
+                joined[code].pending = false; joined[code].approved = false; joined[code].rejected = true; joined[code].status='rejected';
+                await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected' });
+              }
             }
           }
         } catch { /* ignore */ }
