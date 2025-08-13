@@ -113,6 +113,25 @@ async function init(user) {
         t = await readData(`/tournaments/${code}`).catch(()=>t);
       }
     }
+    // Reconcile removed team for captain (if their team was deleted by admin)
+    try {
+      const userJoinedPath = `/users/${user.uid}/tournaments/joined/${code}`;
+      const userJoinedRec = await readData(userJoinedPath).catch(()=>null);
+      if (userJoinedRec && userJoinedRec.approved && !userJoinedRec.removed) {
+        const myTeam = Object.values(t.teams||{}).find(tm=> tm.captain===user.uid);
+        if (!myTeam && t.removedCaptains && t.removedCaptains[user.uid]) {
+          await updateData(userJoinedPath, { removed:true, removedAt: t.removedCaptains[user.uid], approved:false, status:'removed' });
+          // Optional UI notice
+          const notice = document.getElementById('teamAdminCard') || document.getElementById('nonAdminTeamsNotice');
+          if (notice) {
+            const existing = document.getElementById('removedNotice');
+            if (!existing) {
+              const div=document.createElement('div'); div.id='removedNotice'; div.className='muted'; div.style.marginBottom='.5rem'; div.textContent='Your team was removed by the administrator.'; notice.prepend(div);
+            }
+          }
+        }
+      }
+    } catch {}
     renderTeams();
     renderStandings();
     renderFixtures();
@@ -177,7 +196,14 @@ async function init(user) {
           const edit=document.createElement('button'); edit.type='button'; edit.className='icon-btn primary'; edit.innerHTML='✎'; edit.title='Edit team';
           edit.addEventListener('click', ()=>{ editingTeamId=tid; if(teamNameCombo) teamNameCombo.value=tm.name||''; if(teamGroupInput) teamGroupInput.value=tm.group||''; teamFormSubmitBtn.textContent='Save'; teamFormClearBtn.classList.remove('hidden'); teamAddMsg.textContent='Editing'; window.scrollTo({top:0,behavior:'smooth'}); });
           const del=document.createElement('button'); del.type='button'; del.className='icon-btn danger'; del.innerHTML='🗑'; del.title='Remove';
-          del.addEventListener('click', async ()=>{ if(!confirm('Delete team?')) return; await deleteData(`/tournaments/${code}/teams/${tid}`); refresh(); });
+          del.addEventListener('click', async ()=>{ if(!confirm('Delete team?')) return; 
+            const captainUid = tm.captain;
+            await deleteData(`/tournaments/${code}/teams/${tid}`);
+            // Record removal marker inside tournament so captain client can self-mark removed (avoids cross-user write perms)
+            if (captainUid) {
+              try { await updateData(`/tournaments/${code}/removedCaptains`, { [captainUid]: Date.now() }); } catch {}
+            }
+            refresh(); });
           actions.append(view, edit, del);
         }
       } else if (tm.approved) {
@@ -799,9 +825,10 @@ async function init(user) {
     }
     if (adminName) lines.push(`<div><strong>Admin:</strong> ${adminName}${adminEmail? ' ('+adminEmail+')':''}</div>`);
     else if (t.admin) lines.push(`<div><strong>Admin:</strong> ${t.admin}</div>`);
-    // Insert rules display block (always visible label; content below)
-    const rulesBlockId = 'rulesDisplayBlock';
-    lines.push(`<div id='${rulesBlockId}' style='margin-top:.5rem;'><div><strong>Rules / Notes</strong></div><div id='rulesDisplay' style='white-space:pre-wrap; margin-top:.25rem;'>${c.rules?c.rules:'<span class="muted">No rules yet</span>'}</div></div>`);
+  // Rules display block: for admins we rely on the form's label; for non-admins show a heading here
+  const rulesBlockId = 'rulesDisplayBlock';
+  const heading = isAdmin ? '' : '<div><strong>Rules / Notes</strong></div>';
+  lines.push(`<div id='${rulesBlockId}' style='margin-top:.5rem;'>${heading}<div id='rulesDisplay' style='white-space:pre-wrap; margin-top:.25rem;'>${c.rules?c.rules:'<span class=\"muted\">No rules yet</span>'}</div></div>`);
     wrap.innerHTML = lines.join('') || '<div class="muted">No details yet</div>';
     const formEl = document.getElementById('detailsForm');
     if (formEl) formEl.hidden = !isAdmin; // ensure enforced each refresh

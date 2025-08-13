@@ -51,6 +51,10 @@ async function submitJoin(code, role, payload, user, sport) {
   // Prevent dual-role (spectator + captain). Check existing user entries
   const existingJoined = await readData(`/users/${user.uid}/tournaments/joined/${code}`).catch(()=>null);
   const existingSpectate = await readData(`/users/${user.uid}/tournaments/spectating/${code}`).catch(()=>null);
+  // If prior captain record was soft-deleted, clear it so a clean reapply succeeds
+  if (role === 'captain' && existingJoined && existingJoined.deleted) {
+    try { await deleteData(`/users/${user.uid}/tournaments/joined/${code}`); } catch {}
+  }
   if (role === 'captain' && existingSpectate && !existingSpectate.deleted) throw new Error('already-spectating');
   if (role === 'spectator' && existingJoined && !existingJoined.deleted) throw new Error('already-captain');
   if (role === 'captain') {
@@ -60,10 +64,49 @@ async function submitJoin(code, role, payload, user, sport) {
     if (match) {
       const [tid, tm] = match;
       if (tm.approved) throw new Error('already-captain'); // already approved
-      // Reset statuses to pending (even if previously rejected)
-      await updateData(`/tournaments/${code}/teams/${tid}`, { approved:false, rejected:false, approvedAt:null, rejectedAt:null, resetAt: Date.now() });
-      await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending:true, approved:false, rejected:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
-      return tid;
+      // Re-read team to ensure it still exists (avoid race if admin deleted between initial read and now)
+      let liveTeam = null;
+      try { liveTeam = await readData(`/tournaments/${code}/teams/${tid}`); } catch {}
+      if (!liveTeam || liveTeam === null || liveTeam.deleted) {
+        // Original team gone; create a fresh pending team
+        let newRes;
+        try {
+          newRes = await pushData(`/tournaments/${code}/teams`, {
+            name: payload.teamName,
+            createdAt: Date.now(),
+            approved:false,
+            rejected:false,
+            captain: user.uid,
+            requesterUid: user.uid,
+            requesterName: payload.displayName || 'Captain',
+            reapplyOf: tid
+          });
+        } catch (e) { console.error('Reapply push failed', e); throw e; }
+        await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending:true, approved:false, rejected:false, deleted:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
+        return newRes?.name;
+      } else {
+        // Reset statuses to pending (even if previously rejected)
+        try {
+          await updateData(`/tournaments/${code}/teams/${tid}`, { approved:false, rejected:false, approvedAt:null, rejectedAt:null, resetAt: Date.now() });
+        } catch (e) {
+          // If update denied because node vanished after re-check, fall back to push
+          console.warn('Team reset update failed, attempting new push', e);
+          let newRes2 = await pushData(`/tournaments/${code}/teams`, {
+            name: payload.teamName,
+            createdAt: Date.now(),
+            approved:false,
+            rejected:false,
+            captain: user.uid,
+            requesterUid: user.uid,
+            requesterName: payload.displayName || 'Captain',
+            reapplyOf: tid
+          });
+          await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending:true, approved:false, rejected:false, deleted:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
+          return newRes2?.name;
+        }
+        await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending:true, approved:false, rejected:false, deleted:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
+        return tid;
+      }
     }
     // Create a new pending team
     const res = await pushData(`/tournaments/${code}/teams`, {
@@ -399,8 +442,11 @@ export function initTournaments(user, appConfig, sportFilter) {
     ]);
     // Reconcile any stale 'pending' flags by checking tournament team approval.
   const pendingCodes = Object.entries(joined||{}).filter(([code, rec])=> rec?.pending || rec?.rejected).map(([code])=> code);
-    if (pendingCodes.length) {
-      await Promise.all(pendingCodes.map(async code => {
+  // Include approved codes for potential removal reconciliation
+  const approvedCodes = Object.entries(joined||{}).filter(([code, rec])=> rec?.approved && !rec?.removed).map(([code])=> code);
+    const checkCodes = Array.from(new Set([...pendingCodes, ...approvedCodes]));
+    if (checkCodes.length) {
+      await Promise.all(checkCodes.map(async code => {
         try {
           const t = await readData(`/tournaments/${code}`).catch(()=>null);
           if (t?.teams) {
@@ -413,6 +459,10 @@ export function initTournaments(user, appConfig, sportFilter) {
                 joined[code].pending = false; joined[code].approved = false; joined[code].rejected = true; joined[code].status='rejected';
                 await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { pending:false, approved:false, rejected:true, status:'rejected' });
               }
+            } else if (t?.removedCaptains && t.removedCaptains[user.uid] && !joined[code]?.removed) {
+              // Team gone, mark removed locally
+              joined[code].removed = true; joined[code].status = 'removed'; joined[code].approved = false; joined[code].pending = false; joined[code].rejected = false;
+              await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { removed:true, removedAt: t.removedCaptains[user.uid], status:'removed', approved:false, pending:false, rejected:false });
             }
           }
         } catch { /* ignore */ }
@@ -455,58 +505,53 @@ export function initTournaments(user, appConfig, sportFilter) {
       let roleLabel;
       if (created?.[code]) roleLabel = 'Admin';
       else if (joined?.[code]) {
-        if (rec.approved) roleLabel = 'Participant';
+        if (rec.removed || rec.status === 'removed') roleLabel = 'Removed';
+        else if (rec.approved) roleLabel = 'Participant';
         else if (rec.rejected) roleLabel = 'Rejected';
         else if (rec.pending) roleLabel = 'Pending';
         else roleLabel = 'Participant';
       } else roleLabel = 'Spectator';
       if (roleLabel === 'Spectator') rec.pending = false;
-      const roleBadge = `<span class="badge">${roleLabel}</span>`;
-      const nameDisplay = rec.name ? `${rec.name} (${code})` : code;
-      const left = document.createElement('span'); left.innerHTML = `${nameDisplay} ${roleBadge}`;
+  const nameDisplay = rec.name ? `${rec.name} (${code})` : code;
+  const roleClass = (roleLabel === 'Removed') ? 'badge danger' : 'badge';
+  const roleBadge = `<span class="${roleClass}">${roleLabel}</span>`;
+  const left = document.createElement('span'); left.innerHTML = `${nameDisplay} ${roleBadge}`;
       const actions = document.createElement('span'); actions.style.display='flex'; actions.style.gap='.4rem';
       const viewBtn = document.createElement('button'); viewBtn.type='button'; viewBtn.className='icon-btn success'; viewBtn.innerHTML='👁'; viewBtn.title='View';
       viewBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if (sportFilter) window.location.href = `tournament.html?sport=${encodeURIComponent(sportFilter)}&code=${encodeURIComponent(code)}`; });
-      const editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='icon-btn primary'; editBtn.innerHTML='✎'; editBtn.title='Rename';
-      editBtn.addEventListener('click', async (e)=>{
-        e.stopPropagation();
-        if (!created?.[code]) { alert('Only admin can edit'); return; }
-        const tNameInput = document.getElementById('tName');
-        const tAction = document.getElementById('tAction');
-        if (tAction) tAction.value = 'create';
-        const tActionCreateFields = document.getElementById('tActionCreateFields');
-        const tActionJoinFields = document.getElementById('tActionJoinFields');
-        if (tActionCreateFields) tActionCreateFields.hidden = false;
-        if (tActionJoinFields) tActionJoinFields.hidden = true;
-        // Load latest tournament config to prefill format & encounters
-        let tConfig = null;
-        try {
-          const tFull = await readData(`/tournaments/${code}`);
-          tConfig = tFull?.config || {};
-        } catch {}
-        if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
-        if (formatSelect && tConfig?.format) formatSelect.value = tConfig.format;
-        // Prefill encounters & advance if available
-        const encInput = document.getElementById('tEncounters');
-        if (encInput && (tConfig?.encounters != null)) encInput.value = tConfig.encounters;
-        const advInput = document.getElementById('tAdvance');
-        if (advInput && (tConfig?.advancePerGroup != null)) advInput.value = tConfig.advancePerGroup;
-  const ptsInput = document.getElementById('tPointsToWin');
-  if (ptsInput && (tConfig?.pointsToWin != null)) ptsInput.value = tConfig.pointsToWin;
-        const pubEl = document.getElementById('tPublic'); if (pubEl) pubEl.checked = !!tConfig.isPublic;
-        // Re-run requirement logic to reveal encounters row if needed
-        syncRequirements();
-        const form = document.getElementById('tournamentAccessForm');
-        const submitBtn = form?.querySelector('button[type="submit"]');
-        if (submitBtn) submitBtn.textContent='Save';
-        form.dataset.editingCode = code;
-        if (tClearBtn) tClearBtn.classList.remove('hidden');
-      });
+      // Admin-only edit button
+      let editBtn = null;
+      if (created?.[code]) {
+        editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='icon-btn primary'; editBtn.innerHTML='✎'; editBtn.title='Rename';
+        editBtn.addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          const tNameInput = document.getElementById('tName');
+          const tAction = document.getElementById('tAction');
+          if (tAction) tAction.value = 'create';
+          const tActionCreateFields = document.getElementById('tActionCreateFields');
+          const tActionJoinFields = document.getElementById('tActionJoinFields');
+          if (tActionCreateFields) tActionCreateFields.hidden = false;
+          if (tActionJoinFields) tActionJoinFields.hidden = true;
+          let tConfig = null;
+          try { const tFull = await readData(`/tournaments/${code}`); tConfig = tFull?.config || {}; } catch {}
+          if (tNameInput) tNameInput.value = tConfig?.name || rec.name || '';
+          if (formatSelect && tConfig?.format) formatSelect.value = tConfig.format;
+          const encInput = document.getElementById('tEncounters'); if (encInput && (tConfig?.encounters != null)) encInput.value = tConfig.encounters;
+          const advInput = document.getElementById('tAdvance'); if (advInput && (tConfig?.advancePerGroup != null)) advInput.value = tConfig.advancePerGroup;
+          const ptsInput = document.getElementById('tPointsToWin'); if (ptsInput && (tConfig?.pointsToWin != null)) ptsInput.value = tConfig.pointsToWin;
+          const pubEl = document.getElementById('tPublic'); if (pubEl) pubEl.checked = !!tConfig.isPublic;
+          syncRequirements();
+          const form = document.getElementById('tournamentAccessForm');
+          const submitBtn = form?.querySelector('button[type="submit"]'); if (submitBtn) submitBtn.textContent='Save';
+          form.dataset.editingCode = code;
+          if (tClearBtn) tClearBtn.classList.remove('hidden');
+        });
+      }
       const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.title='Remove / Withdraw';
-      // Disable delete if user is approved participant (captain) or admin
-      const isApprovedParticipant = !!(joined?.[code] && rec.approved && !rec.rejected);
+  // Disable delete if user is approved participant (captain), admin, or removed (already processed)
+  const isApprovedParticipant = !!(joined?.[code] && rec.approved && !rec.rejected);
       const isAdminRecord = !!created?.[code];
-      if (isApprovedParticipant || isAdminRecord) {
+  if (isApprovedParticipant || isAdminRecord || rec.removed) {
         delBtn.disabled = true; delBtn.title = 'Cannot remove approved tournament';
       }
       delBtn.addEventListener('click', async (e)=>{
@@ -517,25 +562,31 @@ export function initTournaments(user, appConfig, sportFilter) {
         else if (joined?.[code]) path = `/users/${user.uid}/tournaments/joined/${code}`;
         else if (spectating?.[code]) path = `/users/${user.uid}/tournaments/spectating/${code}`;
         if (!path) { alert('Record not found'); return; }
-        const roleText = created?.[code] ? 'your created list (admin can restore via DB)' : (joined?.[code] ? 'your pending team request' : 'your list');
+        const isJoined = !!joined?.[code];
+        const isPendingOrRejected = isJoined && (rec.pending || rec.rejected) && !rec.approved;
+        const roleText = created?.[code] ? 'your created list (admin can restore via DB)' : (isPendingOrRejected ? 'your pending team request' : (isJoined ? 'your participation record' : 'your list'));
         if (!confirm(`Remove this tournament from ${roleText}?`)) return;
-        await updateData(path, { deleted: true, deletedAt: Date.now() });
-        // If withdrawing a pending captain request, also remove the unapproved team object
-        if (joined?.[code] && (rec.pending || rec.rejected) && !rec.approved) {
-          try {
-            const fullT = await readData(`/tournaments/${code}`).catch(()=>null);
-            if (fullT?.teams) {
-              const pendingEntry = Object.entries(fullT.teams).find(([tid,tm])=> tm.captain===user.uid && tm.approved===false && !tm.rejected);
-              if (pendingEntry) {
-                const [tid] = pendingEntry;
-                await deleteData(`/tournaments/${code}/teams/${tid}`);
+        if (spectating?.[code] || isPendingOrRejected) {
+          // Hard delete for spectator entries and non-approved captain requests
+          try { await deleteData(path); } catch {}
+          if (isPendingOrRejected) {
+            try {
+              const fullT = await readData(`/tournaments/${code}`).catch(()=>null);
+              if (fullT?.teams) {
+                const pendingEntry = Object.entries(fullT.teams).find(([tid,tm])=> tm.captain===user.uid && tm.approved===false && !tm.rejected);
+                if (pendingEntry) {
+                  const [tid] = pendingEntry; await deleteData(`/tournaments/${code}/teams/${tid}`);
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          }
+        } else {
+          // Soft delete for created or approved participation (cannot fully remove for audit)
+          await updateData(path, { deleted:true, deletedAt: Date.now() });
         }
         await renderUserLists();
       });
-      actions.append(viewBtn, editBtn, delBtn);
+  if (editBtn) actions.append(viewBtn, editBtn, delBtn); else actions.append(viewBtn, delBtn);
       li.append(left, actions);
       li.addEventListener('click', ()=>{ if (sportFilter) window.location.href = `tournament.html?sport=${encodeURIComponent(sportFilter)}&code=${encodeURIComponent(code)}`; });
       myList.appendChild(li);
@@ -543,4 +594,8 @@ export function initTournaments(user, appConfig, sportFilter) {
   }
 
   renderUserLists();
+  // Periodic refresh to reconcile removed teams without page navigation
+  if (!window.__tournamentsListPoll) {
+    window.__tournamentsListPoll = setInterval(()=>{ renderUserLists(); }, 10000);
+  }
 }
