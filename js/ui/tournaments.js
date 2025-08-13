@@ -54,7 +54,18 @@ async function submitJoin(code, role, payload, user, sport) {
   if (role === 'captain' && existingSpectate && !existingSpectate.deleted) throw new Error('already-spectating');
   if (role === 'spectator' && existingJoined && !existingJoined.deleted) throw new Error('already-captain');
   if (role === 'captain') {
-    // Create a pending team directly under teams
+    // Reapply logic: if a rejected team with same name & captain exists, reset instead of creating a new entry
+    const teamEntries = Object.entries(t.teams||{});
+    const match = teamEntries.find(([tid,tm])=> tm.captain===user.uid && (tm.name||'').toLowerCase() === (payload.teamName||'').toLowerCase());
+    if (match) {
+      const [tid, tm] = match;
+      if (tm.approved) throw new Error('already-captain'); // already approved
+      // Reset statuses to pending (even if previously rejected)
+      await updateData(`/tournaments/${code}/teams/${tid}`, { approved:false, rejected:false, approvedAt:null, rejectedAt:null, resetAt: Date.now() });
+      await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending:true, approved:false, rejected:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
+      return tid;
+    }
+    // Create a new pending team
     const res = await pushData(`/tournaments/${code}/teams`, {
       name: payload.teamName,
       createdAt: Date.now(),
@@ -64,7 +75,7 @@ async function submitJoin(code, role, payload, user, sport) {
       requesterUid: user.uid,
       requesterName: payload.displayName || 'Captain'
     });
-  await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending: true, approved:false, rejected:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
+    await writeData(`/users/${user.uid}/tournaments/joined/${code}`, { code, sport, pending: true, approved:false, rejected:false, status:'pending', requestedAt: Date.now(), teamName: payload.teamName });
     return res?.name;
   }
   // spectator: save under user
@@ -435,11 +446,14 @@ export function initTournaments(user, appConfig, sportFilter) {
       const li = document.createElement('li');
       const rec = created?.[code] || joined?.[code] || spectating?.[code] || {};
       let roleLabel;
-  if (created?.[code]) roleLabel = 'Admin';
-  else if (joined?.[code]) roleLabel = rec.pending ? 'Pending' : 'Participant';
-  else roleLabel = 'Spectator';
-  // Do not show Pending badge for spectators (ensured by logic above) and only for joined pending teams
-  if (roleLabel === 'Spectator') rec.pending = false;
+      if (created?.[code]) roleLabel = 'Admin';
+      else if (joined?.[code]) {
+        if (rec.approved) roleLabel = 'Participant';
+        else if (rec.rejected) roleLabel = 'Rejected';
+        else if (rec.pending) roleLabel = 'Pending';
+        else roleLabel = 'Participant';
+      } else roleLabel = 'Spectator';
+      if (roleLabel === 'Spectator') rec.pending = false;
       const roleBadge = `<span class="badge">${roleLabel}</span>`;
       const nameDisplay = rec.name ? `${rec.name} (${code})` : code;
       const left = document.createElement('span'); left.innerHTML = `${nameDisplay} ${roleBadge}`;
@@ -482,8 +496,15 @@ export function initTournaments(user, appConfig, sportFilter) {
         if (tClearBtn) tClearBtn.classList.remove('hidden');
       });
       const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='icon-btn danger'; delBtn.innerHTML='🗑'; delBtn.title='Remove / Withdraw';
+      // Disable delete if user is approved participant (captain) or admin
+      const isApprovedParticipant = !!(joined?.[code] && rec.approved && !rec.rejected);
+      const isAdminRecord = !!created?.[code];
+      if (isApprovedParticipant || isAdminRecord) {
+        delBtn.disabled = true; delBtn.title = 'Cannot remove approved tournament';
+      }
       delBtn.addEventListener('click', async (e)=>{
         e.stopPropagation();
+        if (delBtn.disabled) return;
         let path = null;
         if (created?.[code]) path = `/users/${user.uid}/tournaments/created/${code}`;
         else if (joined?.[code]) path = `/users/${user.uid}/tournaments/joined/${code}`;
@@ -493,7 +514,7 @@ export function initTournaments(user, appConfig, sportFilter) {
         if (!confirm(`Remove this tournament from ${roleText}?`)) return;
         await updateData(path, { deleted: true, deletedAt: Date.now() });
         // If withdrawing a pending captain request, also remove the unapproved team object
-        if (joined?.[code] && rec.pending) {
+        if (joined?.[code] && (rec.pending || rec.rejected) && !rec.approved) {
           try {
             const fullT = await readData(`/tournaments/${code}`).catch(()=>null);
             if (fullT?.teams) {
