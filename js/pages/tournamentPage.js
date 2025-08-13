@@ -797,7 +797,14 @@ async function init(user) {
       const rulesEl = document.getElementById('rulesText'); if (rulesEl) rulesEl.value = c.rules||'';
     } else {
       // Clear textarea value for non-admin (avoids accidental exposure if toggled visible via devtools)
-      const rulesEl = document.getElementById('rulesText'); if (rulesEl) rulesEl.value='';
+      const rulesEl = document.getElementById('rulesText');
+      if (rulesEl) {
+        rulesEl.value='';
+        // Extra safety: hide textarea and its submit button even if form markup changes
+        rulesEl.classList.add('hidden');
+        const saveBtn = document.querySelector('#detailsForm button[type="submit"]');
+        if (saveBtn) saveBtn.classList.add('hidden');
+      }
     }
   }
 

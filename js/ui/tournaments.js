@@ -125,7 +125,7 @@ export function initTournaments(user, appConfig, sportFilter) {
       const encountersSelect = document.getElementById('tEncounters');
       if (encountersSelect) encountersSelect.required = showEnc; // only required if visible
       if (showEnc && encountersLabel) {
-        encountersLabel.textContent = (fmt === 'league') ? 'Encounters' : 'Group Stage Encounters';
+        encountersLabel.textContent = (fmt === 'groups_knockout') ? 'Group Encounters' : 'Encounters';
       }
       const showAdv = fmt === 'groups_knockout' && !isJoin;
       if (advanceRow && advanceInput) {
@@ -381,6 +381,25 @@ export function initTournaments(user, appConfig, sportFilter) {
       readData(`/users/${user.uid}/tournaments/joined`).catch(()=>({})),
       readData(`/users/${user.uid}/tournaments/spectating`).catch(()=>({})),
     ]);
+    // Reconcile any stale 'pending' flags by checking tournament team approval.
+    const pendingCodes = Object.entries(joined||{}).filter(([code, rec])=> rec?.pending).map(([code])=> code);
+    if (pendingCodes.length) {
+      await Promise.all(pendingCodes.map(async code => {
+        try {
+          const t = await readData(`/tournaments/${code}`).catch(()=>null);
+          if (t?.teams) {
+            const approvedTeam = Object.values(t.teams).find(tm=> tm.captain===user.uid && tm.approved === true && !tm.rejected);
+            if (approvedTeam && joined[code]?.pending) {
+              // Update local object and persist correction
+              joined[code].pending = false;
+              joined[code].approved = true;
+              joined[code].status = 'approved';
+              await updateData(`/users/${user.uid}/tournaments/joined/${code}`, { pending:false, approved:true, status:'approved' });
+            }
+          }
+        } catch { /* ignore */ }
+      }));
+    }
     // My (created + joined)
     myList.innerHTML = '';
     const mine = { ...(created||{}), ...(joined||{}), ...(spectating||{}) };
