@@ -159,6 +159,8 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .stat-table th, .stat-table td { padding: 4px 6px; }
 #standingsTable th, #standingsTable td { text-align: left; }
 #standingsTable th:first-child, #standingsTable td:first-child { text-align: left; }
+/* Americano standings table alignment */
+#americanoStandings table th, #americanoStandings table td { text-align:left; }
 /* Group standings dynamic tables */
 #tab-standings .group-standings-block table th,
 #tab-standings .group-standings-block table td { text-align:left; padding:4px 6px; }

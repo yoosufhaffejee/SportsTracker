@@ -28,7 +28,7 @@
   "config": { ".read": true, ".write": "auth != null && root.child('tournaments').child($code).child('admin').val() === auth.uid" },
         "teams": {
           "$teamId": {
-            ".write": "auth != null && (root.child('tournaments').child($code).child('admin').val() === auth.uid || (!data.exists() && newData.child('captain').val() === auth.uid))"
+            ".write": "auth != null && (root.child('tournaments').child($code).child('admin').val() === auth.uid || (!data.exists() && newData.child('captain').val() === auth.uid) || (data.exists() && data.child('approved').val() !== true && data.child('captain').val() === auth.uid))"
           }
         },
         "matches": {

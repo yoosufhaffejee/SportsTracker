@@ -204,6 +204,30 @@ async function init(user) {
     const eliminationSummary = standingsCard.querySelector('#eliminationSummary'); if (eliminationSummary) eliminationSummary.remove();
     baseTable.classList.remove('hidden');
     tbody.innerHTML='';
+    if (cfg.format === 'americano') {
+  // Individual cumulative points table (each team represents a single player for Americano; doubles rotation)
+      baseTable.classList.add('hidden');
+      const existing = standingsCard.querySelector('#americanoStandings'); if (existing) existing.remove();
+      const wrap = document.createElement('div'); wrap.id='americanoStandings'; wrap.style.marginTop='.5rem';
+      const table = document.createElement('table'); table.style.width='100%';
+      table.innerHTML = '<thead><tr><th>Player</th><th>Points</th><th>Played</th></tr></thead><tbody></tbody>';
+      const body = table.querySelector('tbody');
+      const points = {}; // playerId -> {name, pts, played}
+      // Map team id to name (treated as player)
+      for (const [tid, tm] of Object.entries(teams)) { points[tid] = { id:tid, name: tm.name||'Player', pts:0, played:0 }; }
+      for (const m of Object.values(matches)) {
+        if (m.stage !== 'americano' || !m.scores || m.scores.a==null || m.scores.b==null) continue;
+  const aPlayers = m.aPlayers||[]; const bPlayers = m.bPlayers||[];
+  // Doubles: each side contributes same points to both players on that side
+  aPlayers.forEach(pid=>{ if(points[pid]) { points[pid].pts += m.scores.a; points[pid].played +=1; } });
+  bPlayers.forEach(pid=>{ if(points[pid]) { points[pid].pts += m.scores.b; points[pid].played +=1; } });
+      }
+      const rows = Object.values(points).sort((x,y)=> y.pts - x.pts || x.name.localeCompare(y.name));
+      if (!rows.length) body.innerHTML='<tr><td colspan="3" class="muted">No data</td></tr>';
+      else rows.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.name}</td><td>${r.pts}</td><td>${r.played}</td>`; body.appendChild(tr); });
+      wrap.appendChild(table); standingsCard.appendChild(wrap);
+      return;
+    }
     if (cfg.format === 'groups_knockout') {
       const byGroup = groupTeams(teams);
       const groupKeys = Object.keys(byGroup).filter(g=> g && g!=='_UNG').sort();
@@ -252,11 +276,176 @@ async function init(user) {
     const format = t?.config?.format || cfg.format;
     const encounters = Math.max(1, (t?.config?.encounters || cfg.encounters || 1) * 1);
     const advancePerGroup = t?.config?.advancePerGroup;
+    const pointsToWin = t?.config?.pointsToWin; // Americano per-game target (not tournament target)
     // Only schedule approved (non-rejected) teams
     const allTeams = Object.entries(t.teams||{})
       .filter(([id,tm])=> tm.approved && !tm.rejected)
       .map(([id,tm])=> ({id, ...tm}));
     if (allTeams.length < 2) { fixturesMsg.textContent='Need at least 2 teams'; return; }
+  // Americano (doubles format): supports >=4 individual players.
+  // For a group of exactly 4 players, generate the 3 unique pairings (perfect matchings):
+  //  (A+B vs C+D), (A+C vs B+D), (A+D vs B+C).
+  // Encounters value controls how many cycles of these pairings are produced.
+  // For more than 4 players, players are partitioned into blocks of 4 each encounter (after applying a rotating bye if count is odd).
+  // Each block of 4 generates the 3 pairings. Leftover players (<4) in a block are ignored that encounter.
+  // If (playersAfterBye % 4)!=0 we still form as many full blocks of 4 as possible; remainder get an implicit bye.
+    if (format === 'americano') {
+      if (!regen && Object.values(t.matches||{}).some(m=> m.stage==='americano')) { fixturesMsg.textContent='Americano fixtures already generated'; return; }
+      if (allTeams.length < 4) { fixturesMsg.textContent='Need at least 4 players'; return; }
+      const matchesOut = {}; let matchCounter=0;
+      const sortedPlayers = [...allTeams].sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+      const n = sortedPlayers.length;
+      // Option A: when n % 4 == 2 (e.g., 6,10,14) use n+2 rounds, each round has two rest players and exactly one match with remaining 4 selected players.
+      if (n % 4 === 2) {
+        const roundsPerEncounter = n + 2;
+        // Pre-compute rest quota per player (deterministic distribution)
+        const totalRestSlots = roundsPerEncounter * 2; // two rests each round
+        const baseRest = Math.floor(totalRestSlots / n);
+        let remainder = totalRestSlots - baseRest * n;
+        const restRemaining = {};
+        sortedPlayers.forEach(p=> { restRemaining[p.id] = baseRest + (remainder>0 ? 1:0); if (remainder>0) remainder--; });
+        for (let cycle=1; cycle<= (encounters||1); cycle++) {
+          // Fresh partnership memory each encounter (as specified)
+          const usedPairs = new Set();
+          // Clone restRemaining for each encounter to preserve distribution per encounter (could also carry over, spec chooses per encounter reset)
+          const encounterRestRemaining = JSON.parse(JSON.stringify(restRemaining));
+          for (let r=0; r<roundsPerEncounter; r++) {
+            const roundNum = r+1 + (cycle-1)*roundsPerEncounter;
+            // Pick two players with highest remaining rest requirement; tie-break by name/id for determinism
+            const candidates = [...sortedPlayers].filter(p=> encounterRestRemaining[p.id] > 0)
+              .sort((a,b)=> encounterRestRemaining[b.id]-encounterRestRemaining[a.id] || (a.name||'').localeCompare(b.name||''));
+            let restPair;
+            function pickRestPair() {
+              for (let i=0;i<candidates.length;i++) {
+                for (let j=i+1;j<candidates.length;j++) {
+                  // Prefer not repeating same rest pair consecutively (simple heuristic)
+                  if (restPair && restPair[0].id===candidates[i].id && restPair[1].id===candidates[j].id) continue;
+                  return [candidates[i], candidates[j]];
+                }
+              }
+              // Fallback: first two players
+              return candidates.slice(0,2);
+            }
+            restPair = pickRestPair();
+            const [restA, restB] = restPair;
+            encounterRestRemaining[restA.id]--; encounterRestRemaining[restB.id]--;
+            const active = sortedPlayers.filter(p=> p.id!==restA.id && p.id!==restB.id);
+            // Choose 4 active players for the single match: simple first 4 strategy; could rotate for fairness
+            const four = active.slice(0,4);
+            if (four.length === 4) {
+              // Evaluate three possible partnerings to minimize used pair repeats
+              const [p0,p1,p2,p3] = four;
+              const pairings = [
+                [[p0,p1],[p2,p3]],
+                [[p0,p2],[p1,p3]],
+                [[p0,p3],[p1,p2]]
+              ];
+              let best = pairings[0]; let bestScore = Infinity;
+              pairings.forEach(pr=> {
+                const [[a1,a2],[b1,b2]] = pr;
+                const s = (usedPairs.has([a1.id,a2.id].sort().join('-'))?1:0) + (usedPairs.has([b1.id,b2.id].sort().join('-'))?1:0);
+                if (s < bestScore) { bestScore = s; best = pr; }
+              });
+              const [[a1,a2],[b1,b2]] = best;
+              usedPairs.add([a1.id,a2.id].sort().join('-'));
+              usedPairs.add([b1.id,b2.id].sort().join('-'));
+              matchesOut[`mA_optA_${Date.now()}_${++matchCounter}`] = {
+                teamA: `${a1.name} / ${a2.name}`,
+                teamB: `${b1.name} / ${b2.name}`,
+                aPlayers:[a1.id,a2.id],
+                bPlayers:[b1.id,b2.id],
+                stage:'americano',
+                createdAt: Date.now(),
+                round: `Round ${roundNum}`,
+                encounter: cycle,
+                pointsToWin: pointsToWin || 16
+              };
+            }
+            // Record both rests as bye entries so UI groups them in heading
+            matchesOut[`bye_optA_${cycle}_${roundNum}_${restA.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restA.id, playerName: restA.name, createdAt: Date.now() };
+            matchesOut[`bye_optA_${cycle}_${roundNum}_${restB.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restB.id, playerName: restB.name, createdAt: Date.now() };
+          }
+        }
+        await updateData(`/tournaments/${code}`, { matches: regen? matchesOut : { ...(t.matches||{}), ...matchesOut } });
+        fixturesMsg.textContent='Americano fixtures generated';
+        refresh(); return;
+      }
+      const roundsPerEncounter = (n % 2 === 0) ? (n - 1) : n; // circle method
+      function rotate(list) {
+        // Keep first fixed, rotate tail right by 1
+        const fixed = list[0];
+        const tail = list.slice(1);
+        tail.unshift(tail.pop());
+        return [fixed, ...tail];
+      }
+      for (let cycle=1; cycle<= (encounters||1); cycle++) {
+        let playerList = [...sortedPlayers];
+        const usedPairs = new Set(); // partnership memory per encounter
+        for (let r=0; r<roundsPerEncounter; r++) {
+          const roundNum = r+1 + (cycle-1)*roundsPerEncounter;
+          let available = [...playerList];
+          let byePlayer = null;
+          if (n % 2 === 1) { // odd -> pick rotating bye
+            byePlayer = available[r % n];
+            available = available.filter(p=> p !== byePlayer);
+          }
+          const roundMatches = [];
+          while (available.length >= 4) {
+            let found = false;
+            // Attempt pair selection minimizing repeats
+            for (let i=0; i<available.length && !found; i++) {
+              for (let j=i+1; j<available.length && !found; j++) {
+                for (let k=0; k<available.length && !found; k++) {
+                  if (k===i || k===j) continue;
+                  for (let l=k+1; l<available.length; l++) {
+                    if (l===i || l===j) continue;
+                    const pair1 = [available[i].id, available[j].id].sort().join('-');
+                    const pair2 = [available[k].id, available[l].id].sort().join('-');
+                    if (!usedPairs.has(pair1) && !usedPairs.has(pair2)) {
+                      const a1=available[i], a2=available[j], b1=available[k], b2=available[l];
+                      roundMatches.push([[a1,a2],[b1,b2]]);
+                      usedPairs.add(pair1); usedPairs.add(pair2);
+                      const removeIds = new Set([a1.id,a2.id,b1.id,b2.id]);
+                      available = available.filter(p=> !removeIds.has(p.id));
+                      found = true; break;
+                    }
+                  }
+                }
+              }
+            }
+            if (!found) {
+              // Fallback sequential pairing on first 4
+              const [a1,a2,a3,a4] = available;
+              roundMatches.push([[a1,a2],[a3,a4]]);
+              const removeIds = new Set([a1.id,a2.id,a3.id,a4.id]);
+              available = available.filter(p=> !removeIds.has(p.id));
+            }
+          }
+          // Persist matches
+          roundMatches.forEach(pairing=>{
+            const [[pA1,pA2],[pB1,pB2]] = pairing;
+            matchesOut[`mAm_${Date.now()}_${++matchCounter}`] = {
+              teamA: `${pA1.name} / ${pA2.name}`,
+              teamB: `${pB1.name} / ${pB2.name}`,
+              aPlayers:[pA1.id,pA2.id],
+              bPlayers:[pB1.id,pB2.id],
+              stage:'americano',
+              createdAt: Date.now(),
+              round: `Round ${roundNum}`,
+              encounter: cycle,
+              pointsToWin: pointsToWin || 16
+            };
+          });
+          if (byePlayer) {
+            matchesOut[`bye_${cycle}_${roundNum}_${byePlayer.id}`] = { bye:true, stage:'americano', encounter: cycle, round: `Round ${roundNum}`, playerId: byePlayer.id, playerName: byePlayer.name, createdAt: Date.now() };
+          }
+          playerList = rotate(playerList);
+        }
+      }
+      await updateData(`/tournaments/${code}`, { matches: regen? matchesOut : { ...(t.matches||{}), ...matchesOut } });
+      fixturesMsg.textContent='Americano fixtures generated';
+      refresh(); return;
+    }
     // Knockout direct
     if (format === 'knockout') {
       if (!regen && Object.values(t.matches||{}).some(m=> m.stage==='knockout')) { fixturesMsg.textContent='Knockout fixtures already generated'; return; }
@@ -365,6 +554,7 @@ async function init(user) {
     if (!matchesRaw.length) { fixturesList.innerHTML='<div class="muted">No fixtures yet</div>'; return; }
     const groupStageMatches = matchesRaw.filter(([mid,m])=> m.stage==='group');
     const knockoutMatches = matchesRaw.filter(([mid,m])=> m.stage==='knockout');
+  const americanoMatches = matchesRaw.filter(([mid,m])=> m.stage==='americano');
     if (groupStageMatches.length) {
       const byGroup = {};
       groupStageMatches.forEach(([mid,m])=>{ if(!byGroup[m.group]) byGroup[m.group]=[]; byGroup[m.group].push([mid,m]); });
@@ -382,7 +572,40 @@ async function init(user) {
         byRound[rn].forEach(([mid,m])=> fixturesList.appendChild(renderMatchCard(mid,m)) );
       });
     }
-    if (!groupStageMatches.length && !knockoutMatches.length) {
+    if (americanoMatches.length) {
+      // If rounds are defined (5-player or 7-player schedules) group by round and show rest in heading
+      const hasRounds = americanoMatches.some(([mid,m])=> !!m.round);
+      if (hasRounds) {
+        const byRound = {};
+        americanoMatches.forEach(([mid,m])=> { const key = m.round || 'Unlabeled'; if(!byRound[key]) byRound[key]=[]; byRound[key].push([mid,m]); });
+        // Sort by numeric round if possible
+        const roundKeys = Object.keys(byRound).sort((a,b)=>{
+          const na = parseInt(a.replace(/[^0-9]/g,''),10); const nb = parseInt(b.replace(/[^0-9]/g,''),10);
+          if (!isNaN(na) && !isNaN(nb)) return na-nb; return a.localeCompare(b);
+        });
+        // Map team ids for restPlayer lookup (5-player schedule embeds restPlayer on each match)
+        const teamNameById = Object.fromEntries(Object.entries(t.teams||{}).map(([id,tm])=> [id, tm.name||id]));
+        roundKeys.forEach(rk=>{
+          const entries = byRound[rk];
+          const restNames = new Set();
+          entries.forEach(([mid,m])=>{
+            if (m.stage==='americano') {
+              if (m.bye && m.playerName) restNames.add(m.playerName);
+              else if (m.restPlayer) restNames.add(teamNameById[m.restPlayer] || m.restPlayer);
+            }
+          });
+          const heading = document.createElement('h4');
+          if (restNames.size) heading.textContent = `${rk} – Rest: ${Array.from(restNames).join(', ')}`; else heading.textContent = rk;
+          heading.style.margin='1rem 0 .5rem';
+          fixturesList.appendChild(heading);
+          entries.forEach(([mid,m])=> { if (!(m.bye && m.stage==='americano')) fixturesList.appendChild(renderMatchCard(mid,m)); });
+        });
+      } else {
+        const heading = document.createElement('h4'); heading.textContent = 'Americano'; heading.style.margin='1rem 0 .5rem'; fixturesList.appendChild(heading);
+        americanoMatches.forEach(([mid,m])=> fixturesList.appendChild(renderMatchCard(mid,m)) );
+      }
+    }
+  if (!groupStageMatches.length && !knockoutMatches.length && !americanoMatches.length) {
       const matches = matchesRaw; const pairEncounterCount={}; const rounds={};
       for (const [mid,m] of matches) { const key=[m.teamAId||m.teamA,m.teamBId||m.teamB].sort().join('|'); let encounterNo=m.encounter; if(!encounterNo){ encounterNo=(pairEncounterCount[key]||0)+1; pairEncounterCount[key]=encounterNo;} else { pairEncounterCount[key]=Math.max(pairEncounterCount[key]||0,encounterNo);} if(!rounds[encounterNo]) rounds[encounterNo]=[]; rounds[encounterNo].push([mid,m]); }
       const roundNumbers = Object.keys(rounds).map(n=> parseInt(n,10)).sort((a,b)=> a-b);
@@ -394,10 +617,13 @@ async function init(user) {
 
   function renderMatchCard(mid,m) {
     const card = document.createElement('div'); card.className='card'; card.style.padding='.6rem .75rem';
+    if (m.bye && m.stage==='americano') { return document.createComment('rest displayed in heading'); }
     if (m.bye) { card.innerHTML = `<div><strong>${m.teamA}</strong> advances (bye)</div>`; return card; }
     const scoreStr = (m.scores && m.scores.a!=null && m.scores.b!=null) ? `<strong>${m.scores.a}-${m.scores.b}</strong>` : '<span class="muted">TBD</span>';
+    const showRoundBadge = !(m.stage==='americano' && m.round); // hide round badge for grouped Americano
+    const showEncounter = m.encounter && ((t?.config?.encounters||1) > 1);
     card.innerHTML = `<div style='display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap;'>
-      <div><strong>${m.teamA}</strong> vs <strong>${m.teamB||''}</strong> ${scoreStr}</div>
+      <div><strong>${m.teamA}</strong> vs <strong>${m.teamB||''}</strong> ${scoreStr}${showRoundBadge && m.round?` <span class='badge'>${m.round}</span>`:''}${showEncounter?` <span class='badge'>E${m.encounter}</span>`:''}</div>
       <div class='muted' style='font-size:.75rem;'>${m.date ? new Date(m.date).toLocaleDateString():''}</div>
       </div>`;
     if (isAdmin && !m.bye) {
@@ -422,6 +648,14 @@ async function init(user) {
   }
 
   function editMatch(mid, m) {
+    if (cfg.format === 'americano' || m.stage==='americano') {
+      const aScore = prompt(`${m.teamA} points (to ${m.pointsToWin||t.config?.pointsToWin||16})`, m.scores?.a!=null?m.scores.a:''); if (aScore===null) return;
+      const bScore = prompt(`${m.teamB} points (to ${m.pointsToWin||t.config?.pointsToWin||16})`, m.scores?.b!=null?m.scores.b:''); if (bScore===null) return;
+      const a = parseInt(aScore,10); const b = parseInt(bScore,10);
+      if (isNaN(a) || isNaN(b)) { alert('Invalid points'); return; }
+      updateData(`/tournaments/${code}/matches/${mid}`, { scores: { a, b }, updatedAt: Date.now() }).then(refresh);
+      return;
+    }
     const aScore = prompt(`${m.teamA} score`, m.scores?.a!=null?m.scores.a:''); if (aScore===null) return;
     const bScore = prompt(`${m.teamB} score`, m.scores?.b!=null?m.scores.b:''); if (bScore===null) return;
     const a = parseInt(aScore,10); const b = parseInt(bScore,10);
