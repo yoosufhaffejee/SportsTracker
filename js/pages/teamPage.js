@@ -51,9 +51,13 @@ async function init(user){
   let localPlayersCache = await loadLocalPlayers();
 
   function resetForm(){
-    form.tpId.value='';
-    nameCombo.value=''; surnameInput.value=''; ageInput.value=''; contactInput.value='';
-    submitBtn.textContent='Save'; clearBtn.classList.add('hidden'); msgEl.textContent='';
+  const idInput = document.getElementById('tpId'); if (idInput) idInput.value='';
+  if (nameCombo) nameCombo.value='';
+  if (ageInput) ageInput.value='';
+  if (contactInput) contactInput.value='';
+  submitBtn.textContent='Save';
+  clearBtn.classList.add('hidden');
+  msgEl.textContent='';
   }
   clearBtn?.addEventListener('click', resetForm);
 
@@ -96,7 +100,8 @@ async function init(user){
   const surname = parts.join(' ');
     const age = ageInput.value ? Number(ageInput.value) : null;
     const contact = contactInput.value.trim() || null;
-    const id = form.tpId.value;
+  const idInput = document.getElementById('tpId');
+  const id = idInput ? idInput.value : '';
   const payload = { name: first, surname, age, contact, updatedAt: Date.now(), createdBy: user.uid };
   if (!id){ await pushData(`/tournaments/${code}/teamPlayers/${teamId}`, { ...payload, createdAt: Date.now() }); msgEl.textContent='Added'; }
   else { await updateData(`/tournaments/${code}/teamPlayers/${teamId}/${id}`, payload); msgEl.textContent='Updated'; }
