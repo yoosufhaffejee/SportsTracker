@@ -307,63 +307,78 @@ async function init(user) {
         for (let cycle=1; cycle<= (encounters||1); cycle++) {
           // Fresh partnership memory each encounter (as specified)
           const usedPairs = new Set();
+          // Pre-compute universe of partner pairs for coverage tracking
+          const allPairs = [];
+          for (let i=0;i<n;i++) for (let j=i+1;j<n;j++) allPairs.push([sortedPlayers[i].id, sortedPlayers[j].id].sort().join('-'));
+          const unusedPairs = new Set(allPairs);
           // Clone restRemaining for each encounter to preserve distribution per encounter (could also carry over, spec chooses per encounter reset)
           const encounterRestRemaining = JSON.parse(JSON.stringify(restRemaining));
           for (let r=0; r<roundsPerEncounter; r++) {
             const roundNum = r+1 + (cycle-1)*roundsPerEncounter;
-            // Pick two players with highest remaining rest requirement; tie-break by name/id for determinism
-            const candidates = [...sortedPlayers].filter(p=> encounterRestRemaining[p.id] > 0)
-              .sort((a,b)=> encounterRestRemaining[b.id]-encounterRestRemaining[a.id] || (a.name||'').localeCompare(b.name||''));
-            let restPair;
-            function pickRestPair() {
-              for (let i=0;i<candidates.length;i++) {
-                for (let j=i+1;j<candidates.length;j++) {
-                  // Prefer not repeating same rest pair consecutively (simple heuristic)
-                  if (restPair && restPair[0].id===candidates[i].id && restPair[1].id===candidates[j].id) continue;
-                  return [candidates[i], candidates[j]];
+            // Evaluate all possible rest pairs (players with remaining rest capacity)
+            const restCandidates = sortedPlayers.filter(p=> encounterRestRemaining[p.id] > 0);
+            let bestChoice = null; // {restA,restB, pairing, score}
+            function pairKey(a,b){ return [a.id,b.id].sort().join('-'); }
+            for (let i=0;i<restCandidates.length;i++) {
+              for (let j=i+1;j<restCandidates.length;j++) {
+                const restA = restCandidates[i]; const restB = restCandidates[j];
+                const active = sortedPlayers.filter(p=> p.id!==restA.id && p.id!==restB.id);
+                if (active.length < 4) continue;
+                // Choose 4 of the active players – heuristic: try all 4-combinations but cap (n small for n%4==2 pattern typical)
+                function* combinations(arr,k,start=0,acc=[]) {
+                  if (acc.length===k) { yield acc.slice(); return; }
+                  for (let idx=start; idx< arr.length; idx++) { acc.push(arr[idx]); yield* combinations(arr,k,idx+1,acc); acc.pop(); }
+                }
+                for (const four of combinations(active,4)) {
+                  const [p0,p1,p2,p3] = four;
+                  const pairings = [
+                    [[p0,p1],[p2,p3]],
+                    [[p0,p2],[p1,p3]],
+                    [[p0,p3],[p1,p2]]
+                  ];
+                  pairings.forEach(pr=>{
+                    const [[a1,a2],[b1,b2]] = pr;
+                    const keys = [pairKey(a1,a2), pairKey(b1,b2)];
+                    // Score: primary = number of NEW pairs introduced (higher better), secondary = total restRemaining after assigning (balance), tertiary = minimize repeats
+                    const newCount = keys.reduce((acc,k)=> acc + (unusedPairs.has(k)?1:0),0);
+                    const repeatPenalty = keys.reduce((acc,k)=> acc + (usedPairs.has(k)?1:0),0);
+                    // Potential future balance metric: sum rest remaining after using these rest players
+                    const balanceScore = (encounterRestRemaining[restA.id]-1) + (encounterRestRemaining[restB.id]-1);
+                    const score = -(newCount*100) + repeatPenalty*10 - balanceScore; // lower better
+                    if (!bestChoice || score < bestChoice.score) {
+                      bestChoice = { restA, restB, pairing: pr, score, newCount };
+                    }
+                  });
                 }
               }
-              // Fallback: first two players
-              return candidates.slice(0,2);
             }
-            restPair = pickRestPair();
-            const [restA, restB] = restPair;
-            encounterRestRemaining[restA.id]--; encounterRestRemaining[restB.id]--;
-            const active = sortedPlayers.filter(p=> p.id!==restA.id && p.id!==restB.id);
-            // Choose 4 active players for the single match: simple first 4 strategy; could rotate for fairness
-            const four = active.slice(0,4);
-            if (four.length === 4) {
-              // Evaluate three possible partnerings to minimize used pair repeats
-              const [p0,p1,p2,p3] = four;
-              const pairings = [
-                [[p0,p1],[p2,p3]],
-                [[p0,p2],[p1,p3]],
-                [[p0,p3],[p1,p2]]
-              ];
-              let best = pairings[0]; let bestScore = Infinity;
-              pairings.forEach(pr=> {
-                const [[a1,a2],[b1,b2]] = pr;
-                const s = (usedPairs.has([a1.id,a2.id].sort().join('-'))?1:0) + (usedPairs.has([b1.id,b2.id].sort().join('-'))?1:0);
-                if (s < bestScore) { bestScore = s; best = pr; }
-              });
-              const [[a1,a2],[b1,b2]] = best;
-              usedPairs.add([a1.id,a2.id].sort().join('-'));
-              usedPairs.add([b1.id,b2.id].sort().join('-'));
-              matchesOut[`mA_optA_${Date.now()}_${++matchCounter}`] = {
-                teamA: `${a1.name} / ${a2.name}`,
-                teamB: `${b1.name} / ${b2.name}`,
-                aPlayers:[a1.id,a2.id],
-                bPlayers:[b1.id,b2.id],
-                stage:'americano',
-                createdAt: Date.now(),
-                round: `Round ${roundNum}`,
-                encounter: cycle,
-                pointsToWin: pointsToWin || 16
-              };
+            if (!bestChoice) {
+              // fallback: pick any two with rest remaining
+              const fallbackRests = restCandidates.slice(0,2);
+              if (fallbackRests.length===2) bestChoice = { restA: fallbackRests[0], restB: fallbackRests[1], pairing: null, score: 9999, newCount:0 };
             }
-            // Record both rests as bye entries so UI groups them in heading
-            matchesOut[`bye_optA_${cycle}_${roundNum}_${restA.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restA.id, playerName: restA.name, createdAt: Date.now() };
-            matchesOut[`bye_optA_${cycle}_${roundNum}_${restB.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restB.id, playerName: restB.name, createdAt: Date.now() };
+            if (bestChoice) {
+              const {restA, restB, pairing} = bestChoice;
+              encounterRestRemaining[restA.id]--; encounterRestRemaining[restB.id]--;
+              if (pairing) {
+                const [[a1,a2],[b1,b2]] = pairing;
+                const pk1 = pairKey(a1,a2), pk2 = pairKey(b1,b2);
+                usedPairs.add(pk1); usedPairs.add(pk2); unusedPairs.delete(pk1); unusedPairs.delete(pk2);
+                matchesOut[`mA_optA_${Date.now()}_${++matchCounter}`] = {
+                  teamA: `${a1.name} / ${a2.name}`,
+                  teamB: `${b1.name} / ${b2.name}`,
+                  aPlayers:[a1.id,a2.id],
+                  bPlayers:[b1.id,b2.id],
+                  stage:'americano',
+                  createdAt: Date.now(),
+                  round: `Round ${roundNum}`,
+                  encounter: cycle,
+                  pointsToWin: pointsToWin || 16
+                };
+              }
+              matchesOut[`bye_optA_${cycle}_${roundNum}_${restA.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restA.id, playerName: restA.name, createdAt: Date.now() };
+              matchesOut[`bye_optA_${cycle}_${roundNum}_${restB.id}`] = { bye:true, stage:'americano', encounter: cycle, round:`Round ${roundNum}`, playerId: restB.id, playerName: restB.name, createdAt: Date.now() };
+            }
           }
         }
         await updateData(`/tournaments/${code}`, { matches: regen? matchesOut : { ...(t.matches||{}), ...matchesOut } });
